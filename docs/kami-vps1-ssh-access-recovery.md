@@ -102,8 +102,19 @@ the `helper` phase **adopts** that VM instead of launching a second one — it l
 it up by name. This matters: a second helper means a second ~50 GB boot disk
 counting against the 200 GB Always Free allowance.
 
-State lives in `~/.kami-recovery/` (outside the repo, `chmod 700`). Identifiers
-live in `~/.kami-recovery/env`, which should be `chmod 600`.
+You do not need to type any OCID. The script finds `kami-VPS-1` by name, then
+reads its boot volume from the instance itself. If that fails (unusual name, or
+a second instance), put the identifiers in `~/.kami-recovery/env`:
+
+```bash
+echo 'INSTANCE_OCID=ocid1.instance.oc1...'   >  ~/.kami-recovery/env
+echo 'BOOT_VOLUME_OCID=ocid1.bootvolume...'  >> ~/.kami-recovery/env
+chmod 600 ~/.kami-recovery/env
+```
+
+That file is parsed line by line: a leftover placeholder such as
+`BOOT_VOLUME_OCID=<paste here>` is reported and ignored rather than crashing the
+script (which is what a careless `source` would do).
 
 ## Doing all of it through the API instead of clicking
 

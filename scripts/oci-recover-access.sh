@@ -25,9 +25,32 @@ set -euo pipefail
 #   echo 'INSTANCE_OCID=ocid1.instance.oc1...'   >  ~/.kami-recovery/env
 #   echo 'BOOT_VOLUME_OCID=ocid1.bootvolume...'  >> ~/.kami-recovery/env
 ENV_FILE="${ENV_FILE:-$HOME/.kami-recovery/env}"
-[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
 INSTANCE_OCID="${INSTANCE_OCID:-}"
 BOOT_VOLUME_OCID="${BOOT_VOLUME_OCID:-}"
+
+# Read ~/.kami-recovery/env line by line. Malformed or leftover placeholder
+# values are ignored with a warning instead of breaking the whole script
+# (a line like  BOOT_VOLUME_OCID=<paste here>  must never cause a syntax error).
+load_env_file() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  local k v
+  while IFS='=' read -r k v || [[ -n "$k" ]]; do
+    k="${k#"${k%%[![:space:]]*}"}"; k="${k%%[[:space:]]*}"
+    v="${v%$'\r'}"
+    v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+    [[ -z "$k" || "$k" == \#* ]] && continue
+    if [[ -z "$v" || "$v" == *"<"* || "$v" == *">"* ]]; then
+      warn "ignoring unusable value for $k in $ENV_FILE (placeholder or empty)"
+      continue
+    fi
+    case "$k" in
+      INSTANCE_OCID|BOOT_VOLUME_OCID|HELPER_ID|HELPER_IMAGE_OCID|HELPER_NAME|HELPER_SHAPE|HELPER_USER|SSH_KEY|PUBKEY_FILE)
+        printf -v "$k" '%s' "$v" ;;
+      *) warn "ignoring unknown setting $k in $ENV_FILE" ;;
+    esac
+  done < "$ENV_FILE"
+  return 0
+}
 
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/kami_vps}"
 PUBKEY_FILE="${PUBKEY_FILE:-${SSH_KEY}.pub}"
@@ -47,6 +70,9 @@ log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 ok()   { printf '    \033[1;32m%s\033[0m\n' "$*"; }
 warn() { printf '    \033[1;33m%s\033[0m\n' "$*"; }
 die()  { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# identifiers from ~/.kami-recovery/env (if present)
+load_env_file
 
 confirm() {   # confirm "question"  -> aborts unless y
   read -r -p "$1 [y/N] " REPLY
@@ -79,14 +105,21 @@ ssh_helper() {   # ssh_helper <command>   -> runs on helper, non-interactive
 preflight() {
   log "Preflight"
   command -v oci >/dev/null || die "oci CLI not found. Run this from OCI Cloud Shell."
+  # ---- auto-resolve the instance if no OCID was supplied ----
   if [[ -z "$INSTANCE_OCID" ]]; then
-    cat >&2 <<EOM
-No instance OCID supplied. Create $ENV_FILE (outside the repo) containing:
-    INSTANCE_OCID=ocid1.instance.oc1.<region>.<unique>
-    BOOT_VOLUME_OCID=ocid1.bootvolume.oc1.<region>.<unique>
-or export them before running this script.
-EOM
-    exit 1
+    local ten="${OCI_CLI_TENANCY:-}"
+    [[ -n "$ten" ]] || die "cannot determine the tenancy. In Cloud Shell OCI_CLI_TENANCY is set for you;
+       otherwise add  INSTANCE_OCID=ocid1.instance.oc1...  to $ENV_FILE"
+    local cand
+    for cand in "${INSTANCE_NAME:-}" "kami-VPS-1" "KAMi-VPS-1" "kami-vps-1" "KAMI-VPS-1"; do
+      [[ -n "$cand" ]] || continue
+      INSTANCE_OCID="$(oq 'data[0].id' compute instance list --compartment-id "$ten" \
+                          --display-name "$cand" --all 2>/dev/null || true)"
+      [[ -n "$INSTANCE_OCID" && "$INSTANCE_OCID" != "None" ]] && { ok "found instance by name: $cand"; break; }
+      INSTANCE_OCID=""
+    done
+    [[ -n "$INSTANCE_OCID" ]] || die "could not find an instance called kami-VPS-1.
+       Put its OCID in $ENV_FILE as  INSTANCE_OCID=ocid1.instance.oc1... "
   fi
   [[ -f "$SSH_KEY" ]]     || die "private key not found: $SSH_KEY"
   [[ -f "$PUBKEY_FILE" ]] || die "public key not found: $PUBKEY_FILE"
@@ -97,6 +130,17 @@ EOM
   DISPLAY_NAME="$(oq 'data."display-name"' compute instance get --instance-id "$INSTANCE_OCID")"
   LIFECYCLE="$(oq 'data."lifecycle-state"' compute instance get --instance-id "$INSTANCE_OCID")"
   [[ -n "$COMPARTMENT" && "$COMPARTMENT" != "None" ]] || die "cannot read instance $INSTANCE_OCID (OCID wrong, or wrong region?)"
+
+  # ---- auto-resolve the boot volume if none was supplied ----
+  if [[ -z "$BOOT_VOLUME_OCID" ]]; then
+    BOOT_VOLUME_OCID="$(oq 'data[0]."boot-volume-id"' compute boot-volume-attachment list \
+                          --compartment-id "$COMPARTMENT" --availability-domain "$AD" \
+                          --instance-id "$INSTANCE_OCID" 2>/dev/null || true)"
+    [[ -n "$BOOT_VOLUME_OCID" && "$BOOT_VOLUME_OCID" != "None" ]] \
+      || die "could not find the boot volume attached to this instance. Add
+       BOOT_VOLUME_OCID=ocid1.bootvolume.oc1... to $ENV_FILE"
+    ok "boot volume auto-detected from the instance"
+  fi
 
   TARGET_IP="$(oq 'data[0]."public-ip"' compute instance list-vnics --instance-id "$INSTANCE_OCID")"
   SUBNET_ID="$(oq 'data[0]."subnet-id"' compute instance list-vnics --instance-id "$INSTANCE_OCID")"
