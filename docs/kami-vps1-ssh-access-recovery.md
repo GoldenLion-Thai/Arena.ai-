@@ -72,7 +72,40 @@ and are simply carried across. **Stop only — never Terminate, and never tick "
 
 **Downtime:** roughly 20–40 minutes. **Insurance:** step 0 gives you a rollback point.
 
-### Doing all of it through the API instead of clicking
+### Run it one confirmed step at a time (recommended)
+
+`oci-recover-access.sh` is deliberately split into small phases. Each state-changing
+one prints what it is about to do and waits for you to type `yes` before doing it.
+Nothing runs on autopilot.
+
+```bash
+bash oci-recover-access.sh plan       # read-only: what would happen
+bash oci-recover-access.sh status     # read-only: where you are right now
+bash oci-recover-access.sh backup     # safety net; instance stays RUNNING
+bash oci-recover-access.sh helper     # create OR adopt kami-helper, print its IP
+
+bash oci-recover-access.sh stop       # STOP (never terminate)
+bash oci-recover-access.sh detach     # detach the boot volume
+bash oci-recover-access.sh attach     # attach it to the helper as R/W data volume
+bash oci-recover-access.sh fix        # append your key, verify, unmount
+bash oci-recover-access.sh unattach   # detach it from the helper
+bash oci-recover-access.sh reattach   # reattach as the instance's boot volume
+bash oci-recover-access.sh start      # start, wait for sshd, first checks
+
+bash oci-recover-access.sh cleanup    # terminate the helper once access is proven
+```
+
+`full` runs the same sequence, confirming each step in turn.
+
+If you created `kami-helper` by hand (in the console or with a raw `oci` command),
+the `helper` phase **adopts** that VM instead of launching a second one — it looks
+it up by name. This matters: a second helper means a second ~50 GB boot disk
+counting against the 200 GB Always Free allowance.
+
+State lives in `~/.kami-recovery/` (outside the repo, `chmod 700`). Identifiers
+live in `~/.kami-recovery/env`, which should be `chmod 600`.
+
+## Doing all of it through the API instead of clicking
 
 Yes — every step above is an API call, and **OCI Cloud Shell already has the `oci` CLI installed and
 authenticated** (no key setup, no local install). This repo ships a driver script,

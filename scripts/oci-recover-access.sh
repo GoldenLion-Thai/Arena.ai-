@@ -177,12 +177,14 @@ phase_backup() {
   ok "Backup AVAILABLE — you now have a rollback point."
 }
 
-# ================================ PHASE: FULL ===============================
 launch_helper() {
   log "Launching helper VM $HELPER_NAME"
   if [[ -f "$STATE_DIR/helper-id" ]]; then
     HELPER_ID="$(cat "$STATE_DIR/helper-id")"
     ok "helper already recorded: $HELPER_ID (reusing)"
+  elif [[ -n "${HELPER_ID:-}" ]]; then
+    ok "helper supplied in the environment: $HELPER_ID (reusing)"
+    echo "$HELPER_ID" > "$STATE_DIR/helper-id"
   else
     HELPER_ID="$(oq 'data.id' compute instance launch \
         --compartment-id "$COMPARTMENT" \
@@ -288,109 +290,239 @@ HELPER_EOF
   ok "generated in-guest fix script"
 }
 
-phase_full() {
-  preflight
+# ========================== GRANULAR, CONFIRMED STEPS =======================
+# Each mutating step is separate, idempotent where possible, and refuses to run
+# until you type "yes". Run them one at a time and read the output between each.
+# ---------------------------------------------------------------------------
+gate() {   # gate "what this step will do"
+  echo
+  printf '    \033[1;33mNEXT STEP:\033[0m %s\n' "$1"
+  if [[ "${ASSUME_YES:-0}" == "1" ]]; then
+    warn "AUTO-CONFIRMED (ASSUME_YES=1)"
+    return
+  fi
+  read -r -p "    Type 'yes' to do this step, anything else aborts: " REPLY
+  [[ "$REPLY" == "yes" ]] || { echo "    Aborted. Nothing was changed."; exit 0; }
+}
 
-  if [[ ! -f "$STATE_DIR/last-backup-id" ]]; then
-    warn "No backup recorded in this session."
-    confirm "Create a boot-volume backup first? (strongly recommended)"
-    phase_backup
+load_state() {
+  # NOTE: each line must tolerate a missing file without tripping `set -e`.
+  if [[ -f "$STATE_DIR/helper-id" ]];          then HELPER_ID="$(cat "$STATE_DIR/helper-id")";          fi
+  if [[ -f "$STATE_DIR/helper-ip" ]];          then HELPER_IP="$(cat "$STATE_DIR/helper-ip")";          fi
+  if [[ -f "$STATE_DIR/data-attachment-id" ]]; then DATA_ATTACH_ID="$(cat "$STATE_DIR/data-attachment-id")"; fi
+  return 0
+}
+
+ensure_backup() {
+  if [[ -f "$STATE_DIR/last-backup-id" ]]; then
+    ok "backup present: $(cat "$STATE_DIR/last-backup-id")"
+    return
+  fi
+  # look for any recent pre-recovery backup that already exists
+  local existing
+  existing="$(oq 'data[0].id' bv boot-volume-backup list \
+                --compartment-id "$COMPARTMENT" --boot-volume-id "$BOOT_VOLUME_OCID" 2>/dev/null || true)"
+  if [[ -n "$existing" && "$existing" != "None" ]]; then
+    echo "$existing" > "$STATE_DIR/last-backup-id"
+    ok "adopted existing backup: $existing"
+    return
+  fi
+  warn "No backup recorded."
+  gate "create a boot-volume backup first (strongly recommended)"
+  phase_backup
+}
+
+ensure_helper() {
+  load_state
+  if [[ -n "${HELPER_ID:-}" ]]; then
+    ok "helper recorded: $HELPER_ID"
   else
-    ok "backup present from this session: $(cat "$STATE_DIR/last-backup-id")"
+    # IMPORTANT: if a VM called $HELPER_NAME already exists (e.g. you created it
+    # by hand), adopt it instead of launching a second one.
+    local found
+    found="$(oq 'data[0].id' compute instance list --compartment-id "$COMPARTMENT" \
+               --display-name "$HELPER_NAME" --lifecycle-state RUNNING 2>/dev/null || true)"
+    if [[ -n "$found" && "$found" != "None" ]]; then
+      HELPER_ID="$found"
+      echo "$HELPER_ID" > "$STATE_DIR/helper-id"
+      ok "adopted existing helper VM named $HELPER_NAME (no second VM created)"
+    else
+      gate "launch helper VM $HELPER_NAME in $AD (adds a ~50 GB boot disk)"
+      launch_helper
+    fi
   fi
-
-  launch_helper
+  HELPER_IP="$(oq 'data[0]."public-ip"' compute instance list-vnics --instance-id "$HELPER_ID")"
+  echo "$HELPER_IP" > "$STATE_DIR/helper-ip"
+  ok "helper public IP: $HELPER_IP"
   write_helper_script
+}
 
-  # ---------------- stop the real instance ----------------
-  log "Stopping $DISPLAY_NAME (STOP — never terminate)"
-  [[ "$LIFECYCLE" == "STOPPED" ]] || confirm "This takes KAMi-VPS-1 offline for ~15-30 min. Continue?"
-  if [[ "$LIFECYCLE" != "STOPPED" ]]; then
-    oci compute instance action --instance-id "$INSTANCE_OCID" --action SOFTSTOP --wait-for-state STOPPED \
-      >/dev/null 2>&1 || true
-  fi
+step_stop() {
+  preflight
+  ensure_backup
+  ensure_helper
+  LIFECYCLE="$(oq 'data."lifecycle-state"' compute instance get --instance-id "$INSTANCE_OCID")"
+  if [[ "$LIFECYCLE" == "STOPPED" ]]; then ok "$DISPLAY_NAME already STOPPED"; return; fi
+  gate "STOP $DISPLAY_NAME (STOP, never terminate) — offline ~15-30 min"
+  log "Stopping $DISPLAY_NAME"
+  oci compute instance action --instance-id "$INSTANCE_OCID" --action SOFTSTOP \
+      --wait-for-state STOPPED >/dev/null 2>&1 || true
   wait_until "instance state" STOPPED 1200 \
     oq 'data."lifecycle-state"' compute instance get --instance-id "$INSTANCE_OCID"
+  ok "instance is STOPPED. Boot volume still exists and is intact."
+}
 
-  # ---------------- detach boot volume ----------------
-  log "Detaching boot volume from $DISPLAY_NAME"
+step_detach() {
+  preflight
   local bv_attach_id
   bv_attach_id="$(oq 'data[0].id' compute boot-volume-attachment list \
                     --compartment-id "$COMPARTMENT" --availability-domain "$AD" \
-                    --instance-id "$INSTANCE_OCID")"
-  [[ -n "$bv_attach_id" && "$bv_attach_id" != "None" ]] || die "no boot volume attachment found"
+                    --instance-id "$INSTANCE_OCID" 2>/dev/null || true)"
+  [[ -n "$bv_attach_id" && "$bv_attach_id" != "None" ]] || { ok "no boot volume attached - already detached"; return; }
+  gate "detach boot volume $BOOT_VOLUME_OCID from $DISPLAY_NAME"
+  log "Detaching boot volume"
   oci compute boot-volume-attachment detach --boot-volume-attachment-id "$bv_attach_id" --force >/dev/null
   wait_until "boot volume state" AVAILABLE 900 \
     oq 'data."lifecycle-state"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID"
+  ok "boot volume detached and AVAILABLE (data untouched)."
+}
 
-  # ---------------- attach to helper as data volume ----------------
-  log "Attaching boot volume to $HELPER_NAME as a paravirtualised data volume"
-  local data_attach_id
-  data_attach_id="$(oq 'data.id' compute volume-attachment attach-paravirtualized-volume \
+step_attach() {
+  preflight; load_state
+  [[ -n "${HELPER_ID:-}" ]] || die "no helper recorded - run: bash $0 helper"
+  if [[ -n "${DATA_ATTACH_ID:-}" ]]; then
+    local st
+    st="$(oq 'data."lifecycle-state"' compute volume-attachment get \
+             --volume-attachment-id "$DATA_ATTACH_ID" 2>/dev/null || true)"
+    [[ "$st" == "ATTACHED" ]] && { ok "volume already attached to helper"; return; }
+  fi
+  gate "attach the KAMi boot volume to $HELPER_NAME as a Read/Write data volume"
+  DATA_ATTACH_ID="$(oq 'data.id' compute volume-attachment attach-paravirtualized-volume \
                      --instance-id "$HELPER_ID" --volume-id "$BOOT_VOLUME_OCID" \
                      --display-name "kami-root-for-repair" --is-read-only false)"
-  echo "$data_attach_id" > "$STATE_DIR/data-attachment-id"
+  echo "$DATA_ATTACH_ID" > "$STATE_DIR/data-attachment-id"
   wait_until "data attachment" ATTACHED 900 \
-    oq 'data."lifecycle-state"' compute volume-attachment get --volume-attachment-id "$data_attach_id"
+    oq 'data."lifecycle-state"' compute volume-attachment get --volume-attachment-id "$DATA_ATTACH_ID"
+  ok "attached. On the helper it will appear as a new disk (lsblk)."
+}
 
-  # ---------------- fix authorized_keys ----------------
-  log "Appending your key on the helper VM"
+step_fix() {
+  preflight; load_state
+  [[ -n "${HELPER_IP:-}" ]] || die "no helper IP recorded - run: bash $0 helper"
+  write_helper_script
+  gate "append your public key to /home/ubuntu/.ssh/authorized_keys on the attached volume"
+  log "Copying the fix script to the helper and running it"
   scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -q \
       "$STATE_DIR/add_kami_key.sh" "$HELPER_USER@$HELPER_IP:/tmp/add_kami_key.sh"
   local out
   out="$(ssh_helper 'sudo bash /tmp/add_kami_key.sh')"
   echo "$out"
   echo "$out" | grep -q "kami-vps-key (RSA)" \
-    || die "the key fingerprint line was not found in the output above — investigate before continuing"
+    || die "the key fingerprint line was not found in the output above - investigate before continuing"
   ok "key written and verified on the volume"
-
   log "Unmounting"
   ssh_helper "sudo sync; sudo umount $MOUNT_POINT; lsblk -o NAME,FSTYPE,MOUNTPOINTS"
+}
 
-  # ---------------- detach from helper ----------------
-  log "Detaching the volume from $HELPER_NAME"
-  oci compute volume-attachment detach --volume-attachment-id "$data_attach_id" --force >/dev/null
+step_unattach() {
+  preflight; load_state
+  [[ -n "${DATA_ATTACH_ID:-}" ]] || die "no data attachment recorded - run: bash $0 attach"
+  gate "detach the volume from $HELPER_NAME"
+  oci compute volume-attachment detach --volume-attachment-id "$DATA_ATTACH_ID" --force >/dev/null
   wait_until "boot volume state" AVAILABLE 900 \
     oq 'data."lifecycle-state"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID"
+  rm -f "$STATE_DIR/data-attachment-id"
+  ok "detached from helper."
+}
 
-  # ---------------- reattach as boot volume ----------------
-  log "Reattaching the volume as the boot volume of $DISPLAY_NAME"
+step_reattach() {
+  preflight
+  local cur
+  cur="$(oq 'data[0]."boot-volume-id"' compute boot-volume-attachment list \
+           --compartment-id "$COMPARTMENT" --availability-domain "$AD" \
+           --instance-id "$INSTANCE_OCID" 2>/dev/null || true)"
+  if [[ -n "$cur" && "$cur" != "None" ]]; then ok "boot volume already attached to $DISPLAY_NAME"; return; fi
+  gate "reattach $BOOT_VOLUME_OCID as the BOOT volume of $DISPLAY_NAME"
   local new_bv_attach
   new_bv_attach="$(oq 'data.id' compute boot-volume-attachment attach \
                     --boot-volume-id "$BOOT_VOLUME_OCID" --instance-id "$INSTANCE_OCID")"
   wait_until "boot attachment" ATTACHED 900 \
     oq 'data."lifecycle-state"' compute boot-volume-attachment get \
        --boot-volume-attachment-id "$new_bv_attach"
+  ok "reattached as boot volume."
+}
 
-  # ---------------- start and verify ----------------
-  log "Starting $DISPLAY_NAME"
-  oci compute instance action --instance-id "$INSTANCE_OCID" --action START >/dev/null
-  wait_until "instance state" RUNNING 900 \
-    oq 'data."lifecycle-state"' compute instance get --instance-id "$INSTANCE_OCID"
-
-  log "Waiting for sshd"
+step_start() {
+  preflight
+  LIFECYCLE="$(oq 'data."lifecycle-state"' compute instance get --instance-id "$INSTANCE_OCID")"
+  if [[ "$LIFECYCLE" == "RUNNING" ]]; then ok "$DISPLAY_NAME already RUNNING"; else
+    gate "START $DISPLAY_NAME"
+    oci compute instance action --instance-id "$INSTANCE_OCID" --action START >/dev/null
+    wait_until "instance state" RUNNING 900 \
+      oq 'data."lifecycle-state"' compute instance get --instance-id "$INSTANCE_OCID"
+  fi
+  log "Waiting for sshd to accept your key"
   local tries=0
   until ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
             -o ConnectTimeout=10 "ubuntu@$TARGET_IP" 'echo READY' 2>/dev/null | grep -q READY; do
-    tries=$((tries+1)); (( tries > 20 )) && die "instance is RUNNING but not accepting your key — check the output above"
+    tries=$((tries+1)); (( tries > 20 )) && die "instance is RUNNING but not accepting your key - check the output above"
     sleep 15
   done
-
-  log "SUCCESS — running the first read-only checks on KAMi-VPS-1"
+  log "SUCCESS - running the first read-only checks on $DISPLAY_NAME"
   ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "ubuntu@$TARGET_IP" \
     'echo "HOST=$(hostname)"; echo "USER=$(id -un)"; grep PRETTY_NAME /etc/os-release;
      echo; docker ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null || echo "(docker unavailable)";
      echo; df -h /'
-
   cat <<EOF
 
   ------------------------------------------------------------------
   Access restored.
      ssh -i $SSH_KEY ubuntu@$TARGET_IP
-  Clean up the helper VM when you are happy:
+  Clean up the helper VM when you are happy (it costs storage until it is gone):
      bash $0 cleanup
   ------------------------------------------------------------------
 EOF
+}
+
+# ------------------------------- phase: helper ------------------------------
+phase_helper() {
+  preflight
+  ensure_helper
+  cat <<EOF
+
+  Helper is ready.
+     ssh -i $SSH_KEY -o IdentitiesOnly=yes $HELPER_USER@$HELPER_IP
+  Expect the prompt:  $HELPER_USER@$HELPER_NAME:~\$
+EOF
+}
+
+# ------------------------------- phase: status ------------------------------
+phase_status() {
+  preflight; load_state
+  log "Recovery state"
+  ok "instance     : $DISPLAY_NAME ($LIFECYCLE) at $TARGET_IP"
+  ok "boot volume  : $BOOT_VOLUME_OCID"
+  ok "backup       : $( [[ -f "$STATE_DIR/last-backup-id" ]] && cat "$STATE_DIR/last-backup-id" || echo 'none recorded' )"
+  ok "helper       : ${HELPER_ID:-none recorded}"
+  ok "helper IP    : ${HELPER_IP:-none recorded}"
+  ok "data attach  : ${DATA_ATTACH_ID:-none recorded}"
+  echo
+  echo "    Next step suggestions:"
+  [[ "$LIFECYCLE" == "RUNNING" && -z "${DATA_ATTACH_ID:-}" ]] && echo "      bash $0 stop     (after the helper SSH test passes)"
+  [[ "$LIFECYCLE" == "STOPPED" && -z "${DATA_ATTACH_ID:-}" ]] && echo "      bash $0 attach"
+  [[ -n "${DATA_ATTACH_ID:-}" ]]                              && echo "      bash $0 fix, then unattach, reattach, start"
+}
+
+# --------------------------------- phase: full ------------------------------
+phase_full() {
+  cat <<'EOF'
+
+  This runs every step below, in order, asking you to confirm each one.
+  If you would rather do them one at a time (recommended), press Ctrl+C and run:
+      helper -> stop -> detach -> attach -> fix -> unattach -> reattach -> start
+EOF
+  preflight; ensure_backup; ensure_helper
+  step_stop; step_detach; step_attach; step_fix; step_unattach; step_reattach; step_start
 }
 
 # ============================== PHASE: CLEANUP ==============================
@@ -407,12 +539,48 @@ phase_cleanup() {
   ok "helper deleted. Your backup is untouched (see $STATE_DIR/last-backup-id)."
 }
 
+usage() {
+  cat <<EOF
+KAMi-VPS-1 SSH access recovery — one step at a time.
+
+  bash $0 plan       read-only report of what would happen
+  bash $0 status     read-only snapshot of current recovery state
+  bash $0 backup     create a boot-volume backup (safety net; instance stays up)
+  bash $0 helper     create OR adopt the helper VM, print its public IP
+
+  --- the state-changing steps, in order, each confirmed separately ---
+  bash $0 stop       STOP the instance (never terminate)
+  bash $0 detach     detach its boot volume
+  bash $0 attach     attach it to the helper as a Read/Write data volume
+  bash $0 fix        append your public key, verify, unmount
+  bash $0 unattach   detach it from the helper
+  bash $0 reattach   reattach it as the instance's boot volume
+  bash $0 start      start the instance, wait for sshd, run first checks
+
+  bash $0 full       run all of the above with a confirmation at each step
+  bash $0 cleanup    terminate the helper VM (do this once access is proven)
+
+Every mutating step prints what it is about to do and waits for you to type
+"yes". Nothing runs on autopilot unless you set ASSUME_YES=1.
+EOF
+}
+
 # ================================== MAIN ====================================
 PHASE="${1:-plan}"
 case "$PHASE" in
-  plan)    phase_plan ;;
-  backup)  phase_backup ;;
-  full)    phase_full ;;
-  cleanup) phase_cleanup ;;
-  *)       echo "usage: $0 {plan|backup|full|cleanup}" ; exit 1 ;;
+  plan)      phase_plan ;;
+  status)    phase_status ;;
+  backup)    phase_backup ;;
+  helper)    phase_helper ;;
+  stop)      step_stop ;;
+  detach)    step_detach ;;
+  attach)    step_attach ;;
+  fix)       step_fix ;;
+  unattach)  step_unattach ;;
+  reattach)  step_reattach ;;
+  start)     step_start ;;
+  full)      phase_full ;;
+  cleanup)   phase_cleanup ;;
+  -h|--help|help) usage ;;
+  *)         usage ; exit 1 ;;
 esac
