@@ -44,7 +44,7 @@ load_env_file() {
       continue
     fi
     case "$k" in
-      INSTANCE_OCID|BOOT_VOLUME_OCID|HELPER_ID|HELPER_IMAGE_OCID|HELPER_NAME|HELPER_SHAPE|HELPER_USER|SSH_KEY|PUBKEY_FILE)
+      INSTANCE_OCID|BOOT_VOLUME_OCID|TENANCY_OCID|HELPER_ID|HELPER_IMAGE_OCID|HELPER_NAME|HELPER_SHAPE|HELPER_USER|SSH_KEY|PUBKEY_FILE)
         printf -v "$k" '%s' "$v" ;;
       *) warn "ignoring unknown setting $k in $ENV_FILE" ;;
     esac
@@ -106,10 +106,16 @@ preflight() {
   log "Preflight"
   command -v oci >/dev/null || die "oci CLI not found. Run this from OCI Cloud Shell."
   # ---- auto-resolve the instance if no OCID was supplied ----
+  # The tenancy is ONLY needed for the name lookup below. When INSTANCE_OCID is
+  # known we derive the compartment straight from the instance, so a missing
+  # OCI_CLI_TENANCY must never block the recovery.
   if [[ -z "$INSTANCE_OCID" ]]; then
-    local ten="${OCI_CLI_TENANCY:-}"
-    [[ -n "$ten" ]] || die "cannot determine the tenancy. In Cloud Shell OCI_CLI_TENANCY is set for you;
-       otherwise add  INSTANCE_OCID=ocid1.instance.oc1...  to $ENV_FILE"
+    local ten="${OCI_CLI_TENANCY:-${TENANCY_OCID:-}}"
+    [[ -n "$ten" ]] || die "no INSTANCE_OCID and no tenancy to look one up by name.
+       Add the instance OCID to $ENV_FILE - it is all this script needs:
+           echo 'INSTANCE_OCID=ocid1.instance.oc1...' > $ENV_FILE
+       (Console > Compute > Instances > kami-VPS-1 > OCID)
+       Optionally add TENANCY_OCID=ocid1.tenancy... as well."
     local cand
     for cand in "${INSTANCE_NAME:-}" "kami-VPS-1" "KAMi-VPS-1" "kami-vps-1" "KAMI-VPS-1"; do
       [[ -n "$cand" ]] || continue

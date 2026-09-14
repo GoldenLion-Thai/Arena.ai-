@@ -103,8 +103,23 @@ it up by name. This matters: a second helper means a second ~50 GB boot disk
 counting against the 200 GB Always Free allowance.
 
 You do not need to type any OCID. The script finds `kami-VPS-1` by name, then
-reads its boot volume from the instance itself. If that fails (unusual name, or
-a second instance), put the identifiers in `~/.kami-recovery/env`:
+reads its boot volume from the instance itself.
+
+**Before any disk work, check whether the original key is still in Cloud Shell.**
+`kami-VPS-1`'s instance metadata carries an `ssh_authorized_keys` entry commented
+`cloudshell-kami`. Cloud Shell's home directory persists, so the matching private
+key may still be there:
+
+```bash
+ls -la ~/.ssh/                       # look for cloudshell-kami or id_rsa
+ssh -i ~/.ssh/cloudshell-kami -o IdentitiesOnly=yes ubuntu@<kami-public-ip>
+```
+
+If that logs in, stop - no boot-volume swap is needed at all.
+
+Otherwise put the identifiers in `~/.kami-recovery/env` (the instance OCID alone
+is enough; the script derives the compartment from the instance, so no tenancy
+OCID is required):
 
 ```bash
 echo 'INSTANCE_OCID=ocid1.instance.oc1...'   >  ~/.kami-recovery/env
