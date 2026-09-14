@@ -13,9 +13,11 @@
 #  USAGE:  bash oci-cost-audit.sh            # uses the KAMi instance's compartment
 #          COMPARTMENT_OCID=ocid1... bash oci-cost-audit.sh
 # ===========================================================================
+ENV_FILE="${ENV_FILE:-$HOME/.kami-recovery/env}"   # OCIDs kept outside the repo
+[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
 set -euo pipefail
 
-INSTANCE_OCID="${INSTANCE_OCID:-ocid1.instance.oc1.uk-london-1.anwgiljtpmjgfzyctx7sliy54mjkye2nkz53x7gq2l3p5lgvifcqzvnsnu2q}"
+INSTANCE_OCID="${INSTANCE_OCID:-}"
 COMPARTMENT_OCID="${COMPARTMENT_OCID:-}"
 
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }

@@ -11,9 +11,11 @@
 #    AMOUNT=15 bash oci-setup-billing-guard.sh   # different monthly budget
 #    ALERT_EMAIL=other@example.com bash oci-setup-billing-guard.sh
 # ===========================================================================
+ENV_FILE="${ENV_FILE:-$HOME/.kami-recovery/env}"   # OCIDs kept outside the repo
+[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
 set -euo pipefail
 
-INSTANCE_OCID="${INSTANCE_OCID:-ocid1.instance.oc1.uk-london-1.anwgiljtpmjgfzyctx7sliy54mjkye2nkz53x7gq2l3p5lgvifcqzvnsnu2q}"
+INSTANCE_OCID="${INSTANCE_OCID:-}"
 BUDGET_NAME="${BUDGET_NAME:-KAMi-VPS-1-Monthly-Cost-Guard}"
 AMOUNT="${AMOUNT:-12}"                 # monthly budget in account currency
 ALERT_EMAIL="${ALERT_EMAIL:-kamonwansingtothong@gmail.com}"
