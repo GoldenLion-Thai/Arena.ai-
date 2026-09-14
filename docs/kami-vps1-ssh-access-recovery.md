@@ -105,6 +105,18 @@ counting against the 200 GB Always Free allowance.
 You do not need to type any OCID. The script finds `kami-VPS-1` by name, then
 reads its boot volume from the instance itself.
 
+**Three routes that do NOT work, so nobody wastes an evening on them:**
+
+- *Updating instance metadata `ssh_authorized_keys` and rebooting.* OCI rejects the
+  update outright ("the metadata field cannot be updated") and cloud-init does not
+  re-run after first boot.
+- *OCI Bastion.* Oracle's Bastion known-issues page states Managed SSH sessions are
+  not supported for Ampere A1 shapes running anything other than Oracle Linux, so
+  this A1 + Ubuntu instance is excluded. A port-forwarding session tunnels TCP but
+  injects no key, so it cannot fix authentication.
+- *Serial console / GRUB.* Needs a console password; the `ubuntu` account on a
+  cloud image has none, and OCI Ubuntu hides GRUB behind `GRUB_TIMEOUT=0`.
+
 **Before any disk work, check whether the original key is still in Cloud Shell.**
 `kami-VPS-1`'s instance metadata carries an `ssh_authorized_keys` entry commented
 `cloudshell-kami`. Cloud Shell's home directory persists, so the matching private

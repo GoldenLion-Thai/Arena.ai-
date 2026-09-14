@@ -54,22 +54,56 @@ lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS
 mkdir -p "$MOUNT"
 echo
 echo "=== 2. Probing partitions for the KAMi root filesystem ==="
+
+# Some Ubuntu images put root on LVM (ubuntu-vg/ubuntu-lv). Activate any volume
+# groups on the freshly attached disk so logical volumes become visible.
+if command -v vgchange >/dev/null 2>&1; then
+  echo "-- activating LVM volume groups (if any)"
+  vgscan --mknodes >/dev/null 2>&1 || true
+  vgchange -ay >/dev/null 2>&1 || true
+fi
+
 ROOT_DEV=""
-while read -r dev fstype mountpoint; do
-  [ -n "$fstype" ] || continue
-  case "$fstype" in vfat|swap|LVM2_member|iso9660) continue ;; esac
-  [ -z "$mountpoint" ] || continue
-  mount -o ro "$dev" "$MOUNT" 2>/dev/null || continue
+try_mount() {   # try_mount <device> <fstype>
+  local dev="$1" fstype="$2"
+  mount -o ro "$dev" "$MOUNT" 2>/dev/null || return 1
   if [ -d "$MOUNT/home/$TARGET_USER" ] && [ -f "$MOUNT/etc/os-release" ]; then
-    ROOT_DEV="$dev"; umount "$MOUNT"; echo "FOUND root filesystem: $dev ($fstype)"; break
+    ROOT_DEV="$dev"
+    umount "$MOUNT"
+    echo "FOUND root filesystem: $dev ($fstype)"
+    return 0
+  fi
+  # second chance: it is a Linux root even if the home dir is named differently
+  if [ -f "$MOUNT/etc/os-release" ] && [ -d "$MOUNT/etc" ] && [ -d "$MOUNT/root" ]; then
+    echo "  note: $dev looks like a Linux root but has no /home/$TARGET_USER"
   fi
   umount "$MOUNT" 2>/dev/null || true
+  return 1
+}
+
+# Pass 1: plain partitions
+while read -r dev fstype mountpoint; do
+  [ -n "$fstype" ] || continue
+  case "$fstype" in vfat|swap|LVM2_member|iso9660|"") continue ;; esac
+  [ -z "$mountpoint" ] || continue
+  echo "  trying $dev ($fstype)"
+  try_mount "$dev" "$fstype" && break
 done < <(lsblk -lnpo NAME,FSTYPE,MOUNTPOINTS)
 
+# Pass 2: LVM logical volumes (root is often ubuntu-vg/ubuntu-lv)
+if [ -z "$ROOT_DEV" ] && command -v lvs >/dev/null 2>&1; then
+  while read -r lv; do
+    [ -n "$lv" ] || continue
+    echo "  trying LV $lv"
+    try_mount "$lv" "lvm" && break
+  done < <(lvs --noheadings -o lv_path 2>/dev/null | tr -d ' ')
+fi
+
 if [ -z "$ROOT_DEV" ]; then
-  echo "No root filesystem found automatically."
-  echo "If the volume uses LVM: sudo vgchange -ay && sudo lvs, then re-run with the LV path."
-  echo "Otherwise run: lsblk -f  and mount the largest ext4 partition manually."
+  echo
+  echo "No root filesystem found automatically. Paste this output back:"
+  echo "--- lsblk -f ---"; lsblk -f
+  echo "--- lvs ---"; lvs 2>/dev/null || echo "(no LVM)"
   exit 1
 fi
 
