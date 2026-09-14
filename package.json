@@ -1,0 +1,15 @@
+{
+  "name": "sovereign-private-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sovereign — reference implementation of a privacy-first, local-first, chat-first private LLM interface.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/smoke.mjs"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.0.1"
+  }
+}
