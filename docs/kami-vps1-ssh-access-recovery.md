@@ -72,6 +72,43 @@ and are simply carried across. **Stop only — never Terminate, and never tick "
 
 **Downtime:** roughly 20–40 minutes. **Insurance:** step 0 gives you a rollback point.
 
+### Doing all of it through the API instead of clicking
+
+Yes — every step above is an API call, and **OCI Cloud Shell already has the `oci` CLI installed and
+authenticated** (no key setup, no local install). This repo ships a driver script,
+**`scripts/oci-recover-access.sh`**, that runs the whole sequence for you. Upload it (Cloud Shell
+`⋯ → Upload`) or paste it, then:
+
+```bash
+chmod +x oci-recover-access.sh
+bash oci-recover-access.sh plan      # resolves everything, changes nothing — run this first
+bash oci-recover-access.sh backup    # creates the boot-volume backup and waits for AVAILABLE
+bash oci-recover-access.sh full      # the whole recovery; prompts before it stops the server
+bash oci-recover-access.sh cleanup   # deletes the helper VM once you are back in
+```
+
+It is re-runnable, records progress in `~/.kami-recovery/`, and prompts before the one irreversible-
+feeling step (stopping the instance). It never terminates anything except the helper VM.
+
+The underlying commands, if you want to do them by hand:
+
+```bash
+# stop (never terminate)
+oci compute instance action --instance-id <INSTANCE_OCID> --action SOFTSTOP
+# find + detach the boot volume attachment
+oci compute boot-volume-attachment list --compartment-id <COMPARTMENT_OCID> \
+    --availability-domain <AD> --instance-id <INSTANCE_OCID>
+oci compute boot-volume-attachment detach --boot-volume-attachment-id <ID> --force
+# attach it to the helper as a paravirtualised data volume
+oci compute volume-attachment attach-paravirtualized-volume \
+    --instance-id <HELPER_OCID> --volume-id <BOOT_VOLUME_OCID>
+# ... fix authorized_keys on the helper (step 6), then:
+oci compute volume-attachment detach --volume-attachment-id <DATA_ATTACHMENT_ID> --force
+oci compute boot-volume-attachment attach --boot-volume-id <BOOT_VOLUME_OCID> \
+    --instance-id <INSTANCE_OCID>
+oci compute instance action --instance-id <INSTANCE_OCID> --action START
+```
+
 ### Step 0 — Safety net (5 min, do not skip)
 
 While the instance is still running:
@@ -331,6 +368,33 @@ You should get `ubuntu@kami-vps-1:~$`. The host key fingerprint should still be
 the same machine and not a substitute.
 
 ---
+
+## 3.1 — "Is there anything on it? Can I just delete it and make a new one?"
+
+**You cannot currently answer "is there anything on it", and that is exactly why you shouldn't delete it.**
+The console's 0% CPU / 0.00 load is a point-in-time metric taken while you were locked out. A quiet
+server can still hold Docker volumes, a Coolify install and its database, Traefik TLS certificates,
+`/opt` and `/srv` source trees, Tailscale identity, cron backups and access history. The Grid-OS handover
+claims Coolify/Traefik/Postgres/Redis/Tailscale on this node — unverified, but unverified is not the same
+as empty.
+
+Deleting is easy and irreversible; ticking **"Permanently delete the attached boot volume"** erases the
+only copy. Two things also bite on a rebuild:
+
+- A new instance gets a **new public IP**. The current ephemeral IP `130.162.187.135` cannot be moved to
+  it, so any DNS, webhook or client config pointing at it breaks.
+- You would be rebuilding an A1.Flex 4 OCPU / 24 GB node; capacity in `uk-london-1` AD-1 is not guaranteed.
+
+If you conclude after the health check that you want a clean node anyway, use **replace, not destroy**:
+
+```text
+boot-volume backup  →  build new node  →  verify  →  migrate selected assets
+      →  stop (not terminate) the old node  →  terminate it only after sign-off
+```
+
+Stopping an instance you keep costs only the boot volume; terminating it with its disk costs you the
+evidence. So: **back up first, recover second, decide third.** The recovery is ~20 minutes of waiting; the
+deletion is forever.
 
 ## 4. If a step fails
 
