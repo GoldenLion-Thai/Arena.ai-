@@ -6,8 +6,8 @@
 **Boot volume:** `kami-VPS-1 (Boot Volume)`, 200 GB
 
 ```
-Instance OCID : ocid1.instance.oc1.uk-london-1.anwgiljtpmjgfzyctx7sliy54mjkye2nkz53x7gq2l3p5lgvifcqzvnsnu2q
-Boot vol OCID : ocid1.bootvolume.oc1.uk-london-1.abwgiljtlgteu7rz5bel3jafoppckuresql5xyfcd6aapeszeh3r2xrmip6q
+Instance OCID : <redacted — kept in ~/.kami-recovery/env, not in this repo>
+Boot vol OCID : <redacted — kept in ~/.kami-recovery/env, not in this repo>
 ```
 
 Status: instance is **Running**, CPU/memory metrics show ~0% — consistent with a live-but-quiet node.
@@ -118,7 +118,7 @@ OCI Console → ☰ → Storage → Block Storage → Boot Volumes → kami-VPS-
 → Actions / three-dots → Create boot volume backup → wait until state = AVAILABLE
 ```
 
-(Or from Cloud Shell: `oci bv boot-volume-backup create --boot-volume-id ocid1.bootvolume.oc1.uk-london-1.abwgiljtlgteu7rz5bel3jafoppckuresql5xyfcd6aapeszeh3r2xrmip6q --display-name "kami-vps1-pre-recovery-$(date +%F)" --type INCREMENTAL`)
+(Or from Cloud Shell: `oci bv boot-volume-backup create --boot-volume-id <OCID-redacted> --display-name "kami-vps1-pre-recovery-$(date +%F)" --type INCREMENTAL`)
 
 If anything at all goes wrong later, you restore this backup and you are exactly where you are now.
 
@@ -145,7 +145,7 @@ Resources → Run command → Create command → paste this script:
 #!/bin/bash
 set -e
 sudo mkdir -p /home/ubuntu/.ssh
-printf '%s\n' 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCeEtEu1+D0KumxrmYAG1/QYdSPcS/Z4z0Ot8fpxZ3tG+Yg+UK9UnpN9ju2XWj/ruPUjvJq95cwPwPqDosY/5wTf3UF1n1jGizQt0MVrtYHheYSJMm96UZ54K1ucxztewgthkh3nmuzKqlRHOyNYkarvuBGNGZxgrIiLEg29UUQ+YCA65leZajgbsnUVxGjUw1kjsg6J0MU4iEuvzdMcC8jCrq5h/ZUuVxP7hDR8Jcg+BHYzkDMxpfyQPqSXuJOUC3wcDw/Ko/390dE960QpMgvzfn5Si6qv9nOdsA/FFlm2Fx/D2hGzmo+psZZevN8aDjrrs7+QqRPOUZOUEHmMvbDsM61FmsVpDVPncqTDdan4R33foSn2sQyOSGlJYouLHRqIuc7S//Lllvv0/FhFetLgA/erSl7dshD3Ta7AxxvRwW2luFmpNXtVNENDiGWZbzsDGI077kTS6gw2IYe/Wi9oXdJdt/xDDGvhzAR22tf4Ry8Nik4bsA/xRmuJQxAgeaUaimE1VW0bTO15O+CCfO3+fuuaoH6PMSnETztSeTRM4MUSItKp4aRAXoIQEzhpbsWuDEshAQKY0QfMgBHq4LHvc3m9JBmsfRY8TYP2tvq8F8Sb8TnINTzXjn0AhqPqYPFgefdGy9nel59746wfrkphlJdl8wIswQ8/FRC5Ermqw== kami-vps-key' | sudo tee -a /home/ubuntu/.ssh/authorized_keys >/dev/null
+printf '%s\n' '----- PASTE THE CONTENTS OF ~/.ssh/kami_vps.pub HERE -----' | sudo tee -a /home/ubuntu/.ssh/authorized_keys >/dev/null
 sudo chown -R ubuntu:ubuntu /home/ubuntu/.ssh
 sudo chmod 700 /home/ubuntu/.ssh
 sudo chmod 600 /home/ubuntu/.ssh/authorized_keys
@@ -225,7 +225,7 @@ cat > ~/add_kami_key.sh <<'SCRIPT_EOF'
 set -euo pipefail
 TARGET_USER=ubuntu
 MOUNT=/mnt/kami_root
-PUBKEY='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCeEtEu1+D0KumxrmYAG1/QYdSPcS/Z4z0Ot8fpxZ3tG+Yg+UK9UnpN9ju2XWj/ruPUjvJq95cwPwPqDosY/5wTf3UF1n1jGizQt0MVrtYHheYSJMm96UZ54K1ucxztewgthkh3nmuzKqlRHOyNYkarvuBGNGZxgrIiLEg29UUQ+YCA65leZajgbsnUVxGjUw1kjsg6J0MU4iEuvzdMcC8jCrq5h/ZUuVxP7hDR8Jcg+BHYzkDMxpfyQPqSXuJOUC3wcDw/Ko/390dE960QpMgvzfn5Si6qv9nOdsA/FFlm2Fx/D2hGzmo+psZZevN8aDjrrs7+QqRPOUZOUEHmMvbDsM61FmsVpDVPncqTDdan4R33foSn2sQyOSGlJYouLHRqIuc7S//Lllvv0/FhFetLgA/erSl7dshD3Ta7AxxvRwW2luFmpNXtVNENDiGWZbzsDGI077kTS6gw2IYe/Wi9oXdJdt/xDDGvhzAR22tf4Ry8Nik4bsA/xRmuJQxAgeaUaimE1VW0bTO15O+CCfO3+fuuaoH6PMSnETztSeTRM4MUSItKp4aRAXoIQEzhpbsWuDEshAQKY0QfMgBHq4LHvc3m9JBmsfRY8TYP2tvq8F8Sb8TnINTzXjn0AhqPqYPFgefdGy9nel59746wfrkphlJdl8wIswQ8/FRC5Ermqw== kami-vps-key'
+PUBKEY='----- PASTE THE CONTENTS OF ~/.ssh/kami_vps.pub HERE -----'
 
 [ "$(id -u)" = 0 ] || { echo "Re-run with: sudo bash $0"; exit 1; }
 
@@ -344,8 +344,8 @@ CLI equivalent (from Cloud Shell):
 
 ```bash
 oci compute boot-volume-attachment attach \
-  --boot-volume-id ocid1.bootvolume.oc1.uk-london-1.abwgiljtlgteu7rz5bel3jafoppckuresql5xyfcd6aapeszeh3r2xrmip6q \
-  --instance-id   ocid1.instance.oc1.uk-london-1.anwgiljtpmjgfzyctx7sliy54mjkye2nkz53x7gq2l3p5lgvifcqzvnsnu2q
+  --boot-volume-id <OCID-redacted> \
+  --instance-id   <OCID-redacted>
 ```
 
 Note: a detached boot volume can only be reattached as the boot volume of an instance; you cannot accidentally

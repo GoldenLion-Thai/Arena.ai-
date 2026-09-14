@@ -20,8 +20,14 @@
 set -euo pipefail
 
 # ------------------------------- config ------------------------------------
-INSTANCE_OCID="${INSTANCE_OCID:-ocid1.instance.oc1.uk-london-1.anwgiljtpmjgfzyctx7sliy54mjkye2nkz53x7gq2l3p5lgvifcqzvnsnu2q}"
-BOOT_VOLUME_OCID="${BOOT_VOLUME_OCID:-ocid1.bootvolume.oc1.uk-london-1.abwgiljtlgteu7rz5bel3jafoppckuresql5xyfcd6aapeszeh3r2xrmip6q}"
+# No infrastructure identifiers are stored in this repo. Provide them via the
+# environment, or once by creating  ~/.kami-recovery/env  (outside the repo):
+#   echo 'INSTANCE_OCID=ocid1.instance.oc1...'   >  ~/.kami-recovery/env
+#   echo 'BOOT_VOLUME_OCID=ocid1.bootvolume...'  >> ~/.kami-recovery/env
+ENV_FILE="${ENV_FILE:-$HOME/.kami-recovery/env}"
+[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
+INSTANCE_OCID="${INSTANCE_OCID:-}"
+BOOT_VOLUME_OCID="${BOOT_VOLUME_OCID:-}"
 
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/kami_vps}"
 PUBKEY_FILE="${PUBKEY_FILE:-${SSH_KEY}.pub}"
@@ -73,6 +79,15 @@ ssh_helper() {   # ssh_helper <command>   -> runs on helper, non-interactive
 preflight() {
   log "Preflight"
   command -v oci >/dev/null || die "oci CLI not found. Run this from OCI Cloud Shell."
+  if [[ -z "$INSTANCE_OCID" ]]; then
+    cat >&2 <<EOM
+No instance OCID supplied. Create $ENV_FILE (outside the repo) containing:
+    INSTANCE_OCID=ocid1.instance.oc1.<region>.<unique>
+    BOOT_VOLUME_OCID=ocid1.bootvolume.oc1.<region>.<unique>
+or export them before running this script.
+EOM
+    exit 1
+  fi
   [[ -f "$SSH_KEY" ]]     || die "private key not found: $SSH_KEY"
   [[ -f "$PUBKEY_FILE" ]] || die "public key not found: $PUBKEY_FILE"
   chmod 600 "$SSH_KEY" 2>/dev/null || true

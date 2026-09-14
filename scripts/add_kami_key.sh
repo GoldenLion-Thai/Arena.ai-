@@ -18,7 +18,33 @@
 set -euo pipefail
 TARGET_USER=ubuntu
 MOUNT=/mnt/kami_root
-PUBKEY='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCeEtEu1+D0KumxrmYAG1/QYdSPcS/Z4z0Ot8fpxZ3tG+Yg+UK9UnpN9ju2XWj/ruPUjvJq95cwPwPqDosY/5wTf3UF1n1jGizQt0MVrtYHheYSJMm96UZ54K1ucxztewgthkh3nmuzKqlRHOyNYkarvuBGNGZxgrIiLEg29UUQ+YCA65leZajgbsnUVxGjUw1kjsg6J0MU4iEuvzdMcC8jCrq5h/ZUuVxP7hDR8Jcg+BHYzkDMxpfyQPqSXuJOUC3wcDw/Ko/390dE960QpMgvzfn5Si6qv9nOdsA/FFlm2Fx/D2hGzmo+psZZevN8aDjrrs7+QqRPOUZOUEHmMvbDsM61FmsVpDVPncqTDdan4R33foSn2sQyOSGlJYouLHRqIuc7S//Lllvv0/FhFetLgA/erSl7dshD3Ta7AxxvRwW2luFmpNXtVNENDiGWZbzsDGI077kTS6gw2IYe/Wi9oXdJdt/xDDGvhzAR22tf4Ry8Nik4bsA/xRmuJQxAgeaUaimE1VW0bTO15O+CCfO3+fuuaoH6PMSnETztSeTRM4MUSItKp4aRAXoIQEzhpbsWuDEshAQKY0QfMgBHq4LHvc3m9JBmsfRY8TYP2tvq8F8Sb8TnINTzXjn0AhqPqYPFgefdGy9nel59746wfrkphlJdl8wIswQ8/FRC5Ermqw== kami-vps-key'
+# The public key is NEVER embedded in this script. Supply it one of these ways:
+#   1. export PUBKEY='ssh-rsa AAAA... comment'
+#   2. export PUBKEY_FILE=/path/to/kami_vps.pub
+#   3. copy the .pub onto this helper:  scp -i ~/.ssh/kami_vps ~/.ssh/kami_vps.pub ubuntu@<helper>:/tmp/
+#      (searched automatically below)
+if [ -z "${PUBKEY:-}" ]; then
+  if [ -n "${PUBKEY_FILE:-}" ] && [ -f "$PUBKEY_FILE" ]; then
+    PUBKEY="$(cat "$PUBKEY_FILE")"
+  else
+    for cand in "$HOME/.ssh/kami_vps.pub" /home/ubuntu/.ssh/kami_vps.pub /tmp/kami_vps.pub /tmp/*.pub; do
+      [ -f "$cand" ] && { PUBKEY="$(cat "$cand")"; PUBKEY_FILE="$cand"; break; }
+    done
+  fi
+fi
+if [ -z "${PUBKEY:-}" ]; then
+  cat <<'EOM'
+No public key found. Do one of these, then re-run:
+  export PUBKEY='ssh-rsa AAAA... comment'
+  export PUBKEY_FILE=/path/to/kami_vps.pub
+  scp -i ~/.ssh/kami_vps ~/.ssh/kami_vps.pub ubuntu@<helper-ip>:/tmp/kami_vps.pub
+EOM
+  exit 1
+fi
+[ "$(printf '%s' "$PUBKEY" | awk '{print $1}')" = "ssh-rsa" ] || [ "$(printf '%s' "$PUBKEY" | awk '{print $1}')" = "ssh-ed25519" ] \
+  || { echo "That does not look like an OpenSSH public key (must start ssh-rsa or ssh-ed25519)."; exit 1; }
+echo "Using public key: ${PUBKEY_FILE:-from \$PUBKEY} -> $(printf '%s' "$PUBKEY" | ssh-keygen -l -f /dev/stdin 2>/dev/null || echo 'fingerprint unavailable')"
+
 
 [ "$(id -u)" = 0 ] || { echo "Re-run with: sudo bash $0"; exit 1; }
 
