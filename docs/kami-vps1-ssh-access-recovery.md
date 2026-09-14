@@ -102,6 +102,32 @@ the `helper` phase **adopts** that VM instead of launching a second one — it l
 it up by name. This matters: a second helper means a second ~50 GB boot disk
 counting against the 200 GB Always Free allowance.
 
+### If the instance has already been terminated
+
+Check whether the boot volume survived before doing anything else:
+
+```bash
+oci bv boot-volume get --boot-volume-id "<boot volume OCID>"
+```
+
+`"lifecycle-state": "AVAILABLE"` with the original size means the disk and
+everything on it - Docker volumes, `/opt`, databases, containers, configs - is
+intact. Only the VM wrapper and its ephemeral public IP are gone.
+
+Recovery in that case is *easier*, not harder, because the volume is already
+detached and there is nothing left to stop:
+
+```bash
+bash oci-recover-access.sh rebuild
+```
+
+`rebuild` backstops the volume if no backup exists, attaches it to the helper,
+injects your key, detaches it, then launches a fresh instance that boots from
+that same volume. Two consequences to plan for: the new instance gets a **new
+public IP** (update DNS A records), and it must be an **Ampere A1.Flex** shape
+because the volume holds an aarch64 Ubuntu - an x86 shape cannot boot it. If
+AD-1 has no A1 capacity the script retries rather than falling back.
+
 You do not need to type any OCID. The script finds `kami-VPS-1` by name, then
 reads its boot volume from the instance itself.
 

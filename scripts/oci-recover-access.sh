@@ -109,7 +109,7 @@ preflight() {
   # The tenancy is ONLY needed for the name lookup below. When INSTANCE_OCID is
   # known we derive the compartment straight from the instance, so a missing
   # OCI_CLI_TENANCY must never block the recovery.
-  if [[ -z "$INSTANCE_OCID" ]]; then
+  if [[ -z "$INSTANCE_OCID" && "${CTX_MODE:-instance}" == "instance" ]]; then
     local ten="${OCI_CLI_TENANCY:-${TENANCY_OCID:-}}"
     [[ -n "$ten" ]] || die "no INSTANCE_OCID and no tenancy to look one up by name.
        Add the instance OCID to $ENV_FILE - it is all this script needs:
@@ -130,6 +130,25 @@ preflight() {
   [[ -f "$SSH_KEY" ]]     || die "private key not found: $SSH_KEY"
   [[ -f "$PUBKEY_FILE" ]] || die "public key not found: $PUBKEY_FILE"
   chmod 600 "$SSH_KEY" 2>/dev/null || true
+
+  if [[ "${CTX_MODE:-instance}" == "volume" ]]; then
+    # The instance is gone (terminated). Derive everything from the surviving
+    # boot volume instead: compartment, AD and size all live on the volume.
+    COMPARTMENT="$(oq 'data."compartment-id"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID")"
+    AD="$(oq 'data."availability-domain"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID")"
+    VOL_STATE="$(oq 'data."lifecycle-state"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID")"
+    VOL_SIZE="$(oq 'data."size-in-gbs"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID")"
+    DISPLAY_NAME="(rebuilding - no instance yet)"
+    LIFECYCLE="TERMINATED"
+    TARGET_IP=""
+    [[ -n "$COMPARTMENT" && "$COMPARTMENT" != "None" ]] || die "cannot read boot volume $BOOT_VOLUME_OCID"
+    ok "context      : volume-only (instance terminated)"
+    ok "volume       : ${VOL_SIZE} GB, state $VOL_STATE"
+    ok "compartment  : $COMPARTMENT"
+    ok "AD           : $AD"
+    preflight_tail
+    return
+  fi
 
   COMPARTMENT="$(oq 'data."compartment-id"' compute instance get --instance-id "$INSTANCE_OCID")"
   AD="$(oq 'data."availability-domain"'    compute instance get --instance-id "$INSTANCE_OCID")"
@@ -159,6 +178,10 @@ preflight() {
   ok "boot volume   : $BOOT_VOLUME_OCID  [$(
         oq 'data."lifecycle-state"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID")]"
 
+  preflight_tail
+}
+
+preflight_tail() {
   # does the instance actually hold the boot volume we think it does?
   local attached_bv
   attached_bv="$(oq 'data[0]."boot-volume-id"' compute boot-volume-attachment list \
@@ -575,6 +598,160 @@ EOF
   step_stop; step_detach; step_attach; step_fix; step_unattach; step_reattach; step_start
 }
 
+
+# ========================= PHASE: REBUILD (volume-only) =====================
+# Use this when the instance has already been TERMINATED but its boot volume
+# survived. It attaches the orphaned volume to the helper, injects your key,
+# detaches it, and launches a fresh instance that boots from that same volume.
+#
+# Two things you must know before running it:
+#   * The new instance gets a NEW public IP. Update any DNS A records after.
+#   * The volume holds an aarch64 Ubuntu, so the new instance MUST be an
+#     Ampere A1.Flex shape. If uk-london-1 AD-1 has no A1 capacity this
+#     retries - it never falls back to x86, which cannot boot this disk.
+# ---------------------------------------------------------------------------
+phase_rebuild() {
+  CTX_MODE=volume
+  preflight
+
+  log "Boot volume $BOOT_VOLUME_OCID"
+  [[ "$VOL_STATE" == "AVAILABLE" ]] || die "boot volume is $VOL_STATE, expected AVAILABLE"
+
+  # ---- safety net: make sure a backup of this volume exists ----
+  local existing_backup
+  existing_backup="$(oq 'data[0].id' bv boot-volume-backup list \
+                      --compartment-id "$COMPARTMENT" --boot-volume-id "$BOOT_VOLUME_OCID" 2>/dev/null || true)"
+  if [[ -n "$existing_backup" && "$existing_backup" != "None" ]]; then
+    ok "existing backup: $existing_backup"
+    echo "$existing_backup" > "$STATE_DIR/last-backup-id"
+  else
+    warn "no backup of this volume exists yet"
+    gate "create a backup of the ${VOL_SIZE} GB boot volume first"
+    local bid
+    bid="$(oq 'data.id' bv boot-volume-backup create --boot-volume-id "$BOOT_VOLUME_OCID" \
+            --display-name "kami-orphan-volume-$(date +%Y%m%d-%H%M%S)" --type INCREMENTAL)"
+    echo "$bid" > "$STATE_DIR/last-backup-id"
+    wait_until "backup state" AVAILABLE 2400 \
+      oq 'data."lifecycle-state"' bv boot-volume-backup get --boot-volume-backup-id "$bid"
+  fi
+
+  ensure_helper
+
+  # ---- attach the orphaned volume to the helper ----
+  load_state
+  if [[ -z "${DATA_ATTACH_ID:-}" ]]; then
+    gate "attach the ${VOL_SIZE} GB volume to $HELPER_NAME as Read/Write data volume"
+    DATA_ATTACH_ID="$(oq 'data.id' compute volume-attachment attach-paravirtualized-volume \
+                       --instance-id "$HELPER_ID" --volume-id "$BOOT_VOLUME_OCID" \
+                       --display-name "kami-root-for-repair" --is-read-only false)"
+    echo "$DATA_ATTACH_ID" > "$STATE_DIR/data-attachment-id"
+  fi
+  wait_until "data attachment" ATTACHED 900 \
+    oq 'data."lifecycle-state"' compute volume-attachment get --volume-attachment-id "$DATA_ATTACH_ID"
+
+  # ---- inject the key ----
+  step_fix
+
+  # ---- detach from the helper ----
+  gate "detach the volume from $HELPER_NAME"
+  oci compute volume-attachment detach --volume-attachment-id "$DATA_ATTACH_ID" --force >/dev/null
+  wait_until "boot volume state" AVAILABLE 900 \
+    oq 'data."lifecycle-state"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID"
+  rm -f "$STATE_DIR/data-attachment-id"
+  ok "volume detached and ready to boot"
+
+  # ---- resolve networking for the new instance ----
+  if [[ -z "${SUBNET_ID:-}" ]]; then
+    local vcn_id
+    vcn_id="$(oq 'data[0].id' network vcn list --compartment-id "$COMPARTMENT" 2>/dev/null || true)"
+    [[ -n "$vcn_id" && "$vcn_id" != "None" ]] || die "could not find a VCN; set SUBNET_ID=... in $ENV_FILE"
+    SUBNET_ID="$(oq 'data[0].id' network subnet list --compartment-id "$COMPARTMENT" --vcn-id "$vcn_id" 2>/dev/null || true)"
+    [[ -n "$SUBNET_ID" && "$SUBNET_ID" != "None" ]] || die "could not find a subnet; set SUBNET_ID=... in $ENV_FILE"
+    ok "subnet auto-selected: $SUBNET_ID"
+  fi
+
+  # ---- launch the replacement instance from that boot volume ----
+  local new_shape="${NEW_SHAPE:-VM.Standard.A1.Flex}"
+  local new_ocpus="${NEW_OCPUS:-4}"
+  local new_mem="${NEW_MEMORY:-24}"
+  local new_name="${NEW_NAME:-kami-VPS-1}"
+  cat <<EOF
+
+  About to create a replacement instance:
+      name   : $new_name
+      shape  : $new_shape ($new_ocpus OCPU / ${new_mem} GB)
+      AD     : $AD
+      subnet : $SUBNET_ID
+      boots  : the existing ${VOL_SIZE} GB volume (data preserved)
+      key    : $PUBKEY_FILE
+
+  Note: it will get a NEW public IP. DNS A records for the old IP must be updated.
+EOF
+  gate "create the replacement instance from the existing boot volume"
+
+  local attempt=0 max="${CAPACITY_RETRIES:-20}" new_id="" out=""
+  while (( attempt < max )); do
+    attempt=$((attempt+1))
+    out="$(oci compute instance launch \
+            --compartment-id "$COMPARTMENT" \
+            --availability-domain "$AD" \
+            --display-name "$new_name" \
+            --shape "$new_shape" \
+            --shape-config "{\"ocpus\":$new_ocpus,\"memoryInGBs\":$new_mem}" \
+            --subnet-id "$SUBNET_ID" \
+            --assign-public-ip true \
+            --ssh-authorized-keys-file "$PUBKEY_FILE" \
+            --source-details "{\"type\":\"bootVolume\",\"bootVolumeId\":\"$BOOT_VOLUME_OCID\"}" 2>&1)" \
+      && { new_id="$(printf '%s' "$out" | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)"; break; }
+    if printf '%s' "$out" | grep -qiE 'out of (host )?capacity|capacity|insufficient'; then
+      warn "attempt $attempt/$max: no $new_shape capacity in $AD right now."
+      warn "Your data is safe - the volume is untouched. Retrying in 60s."
+      sleep 60
+      continue
+    fi
+    echo "$out" >&2
+    die "instance launch failed (see error above). The boot volume is untouched."
+  done
+  [[ -n "$new_id" ]] || die "still no $new_shape capacity after $max attempts. Nothing was lost -
+       the ${VOL_SIZE} GB volume is safe. Re-run 'bash $0 rebuild' later or try another AD."
+
+  echo "$new_id" > "$STATE_DIR/new-instance-id"
+  ok "instance created: $new_id"
+
+  wait_until "instance state" RUNNING 1200 \
+    oq 'data."lifecycle-state"' compute instance get --instance-id "$new_id"
+
+  local new_ip
+  new_ip="$(oq 'data[0]."public-ip"' compute instance list-vnics --instance-id "$new_id")"
+  echo "$new_ip" > "$STATE_DIR/new-instance-ip"
+  ok "NEW PUBLIC IP: $new_ip   (the old IP is gone - update DNS)"
+
+  # ---- prove the key works ----
+  log "Waiting for sshd to accept your key"
+  local tries=0
+  until ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=10 "ubuntu@$new_ip" 'echo READY' 2>/dev/null | grep -q READY; do
+    tries=$((tries+1)); (( tries > 20 )) && die "instance is RUNNING but not accepting your key - check the output above"
+    sleep 15
+  done
+
+  log "SUCCESS - first read-only checks on the rebuilt server"
+  ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "ubuntu@$new_ip" \
+    'echo "HOST=$(hostname)"; echo "USER=$(id -un)"; grep PRETTY_NAME /etc/os-release;
+     echo; docker ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null || echo "(docker unavailable)";
+     echo; df -h /'
+
+  cat <<EOF
+
+  ------------------------------------------------------------------
+  Access restored on the NEW instance.
+     ssh -i $SSH_KEY ubuntu@$new_ip
+  Update any DNS A records that pointed at the old IP.
+  Then clean up the helper VM:   bash $0 cleanup
+  ------------------------------------------------------------------
+EOF
+}
+
 # ============================== PHASE: CLEANUP ==============================
 phase_cleanup() {
   preflight
@@ -609,6 +786,8 @@ KAMi-VPS-1 SSH access recovery — one step at a time.
 
   bash $0 full       run all of the above with a confirmation at each step
   bash $0 cleanup    terminate the helper VM (do this once access is proven)
+  bash $0 rebuild    instance already TERMINATED: boot a fresh instance from
+                     the surviving boot volume, injecting your key on the way
 
 Every mutating step prints what it is about to do and waits for you to type
 "yes". Nothing runs on autopilot unless you set ASSUME_YES=1.
@@ -629,6 +808,7 @@ case "$PHASE" in
   unattach)  step_unattach ;;
   reattach)  step_reattach ;;
   start)     step_start ;;
+  rebuild)   phase_rebuild ;;
   full)      phase_full ;;
   cleanup)   phase_cleanup ;;
   -h|--help|help) usage ;;
