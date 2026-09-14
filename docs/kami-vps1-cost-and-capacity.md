@@ -72,7 +72,8 @@ Practical consequences:
 bash oci-cost-audit.sh
 
 # 2. alarm — alert-only budget, no automatic actions, no server contact
-ALERT_EMAIL=you@example.com AMOUNT=12 bash oci-setup-billing-guard.sh
+#    alerts go to kamonwansingtothong@gmail.com by default
+AMOUNT=12 bash oci-setup-billing-guard.sh
 
 # 3. recovery (unchanged plan) — backup first
 bash oci-recover-access.sh plan

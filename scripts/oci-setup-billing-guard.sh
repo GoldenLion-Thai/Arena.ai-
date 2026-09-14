@@ -7,22 +7,23 @@
 #  it to: stopping the VM would not remove boot-volume charges anyway.
 #
 #  USAGE
-#    ALERT_EMAIL=you@example.com bash oci-setup-billing-guard.sh
-#    AMOUNT=15 ALERT_EMAIL=you@example.com bash oci-setup-billing-guard.sh
+#    bash oci-setup-billing-guard.sh             # alerts go to the default address below
+#    AMOUNT=15 bash oci-setup-billing-guard.sh   # different monthly budget
+#    ALERT_EMAIL=other@example.com bash oci-setup-billing-guard.sh
 # ===========================================================================
 set -euo pipefail
 
 INSTANCE_OCID="${INSTANCE_OCID:-ocid1.instance.oc1.uk-london-1.anwgiljtpmjgfzyctx7sliy54mjkye2nkz53x7gq2l3p5lgvifcqzvnsnu2q}"
 BUDGET_NAME="${BUDGET_NAME:-KAMi-VPS-1-Monthly-Cost-Guard}"
 AMOUNT="${AMOUNT:-12}"                 # monthly budget in account currency
-ALERT_EMAIL="${ALERT_EMAIL:-}"
+ALERT_EMAIL="${ALERT_EMAIL:-kamonwansingtothong@gmail.com}"
 THRESHOLDS="${THRESHOLDS:-50 80 100}"  # percent of budget
 
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 ok()   { printf '    %s\n' "$*"; }
 
 command -v oci >/dev/null || { echo "Run this from OCI Cloud Shell."; exit 1; }
-[[ -n "$ALERT_EMAIL" ]] || { echo "Set ALERT_EMAIL, e.g.  ALERT_EMAIL=you@example.com bash $0"; exit 1; }
+[[ "$ALERT_EMAIL" == *@* ]] || { echo "ALERT_EMAIL does not look like an address: $ALERT_EMAIL"; exit 1; }
 
 oq() { local q="$1"; shift; oci "$@" --query "$q" --raw-output; }
 
