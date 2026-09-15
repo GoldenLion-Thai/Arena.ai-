@@ -615,6 +615,38 @@ phase_rebuild() {
   preflight
 
   log "Boot volume $BOOT_VOLUME_OCID"
+
+  # The volume may already be attached - e.g. you launched a replacement
+  # instance, it booted, but the pasted key was never injected so you cannot
+  # log in. Stop that instance and detach before touching anything.
+  if [[ "$VOL_STATE" == "ATTACHED" ]]; then
+    warn "the volume is already attached to an instance"
+    local holder holder_state
+    holder="$(oq 'data[0]."instance-id"' compute boot-volume-attachment list \
+               --compartment-id "$COMPARTMENT" --availability-domain "$AD" \
+               --boot-volume-id "$BOOT_VOLUME_OCID")"
+    [[ -n "$holder" && "$holder" != "None" ]] || die "cannot work out which instance holds the volume"
+    holder_state="$(oq 'data."lifecycle-state"' compute instance get --instance-id "$holder")"
+    ok "attached to: $holder ($holder_state)"
+    if [[ "$holder_state" == "RUNNING" ]]; then
+      gate "STOP the instance holding the volume (stop only, never terminate)"
+      oci compute instance action --instance-id "$holder" --action SOFTSTOP >/dev/null
+      wait_until "instance state" STOPPED 1200 \
+        oq 'data."lifecycle-state"' compute instance get --instance-id "$holder"
+    fi
+    local att
+    att="$(oq 'data[0].id' compute boot-volume-attachment list \
+             --compartment-id "$COMPARTMENT" --availability-domain "$AD" \
+             --boot-volume-id "$BOOT_VOLUME_OCID")"
+    if ! oci compute boot-volume-attachment detach --boot-volume-attachment-id "$att" --force >/dev/null 2>&1; then
+      warn "the CLI refused to detach it ($att)."
+      warn "Detach it in the Console: Storage > Boot Volumes > this volume > Attached instances > Detach."
+      die "re-run 'bash $0 rebuild' once the volume reads AVAILABLE"
+    fi
+    wait_until "boot volume state" AVAILABLE 900 \
+      oq 'data."lifecycle-state"' bv boot-volume get --boot-volume-id "$BOOT_VOLUME_OCID"
+  fi
+
   [[ "$VOL_STATE" == "AVAILABLE" ]] || die "boot volume is $VOL_STATE, expected AVAILABLE"
 
   # ---- safety net: make sure a backup of this volume exists ----
