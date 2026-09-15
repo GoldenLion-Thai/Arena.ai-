@@ -43,7 +43,7 @@ parse a key without its delimiters.
 
 ### (a) Keepalives — stops idle NAT/firewall timeouts
 
-Already emitted by `grid-os sshconfig`. If configuring Terminus by hand, set
+Already emitted by `merc sshconfig`. If configuring Terminus by hand, set
 **Keep alive / ServerAliveInterval = 60**. A 60-second heartbeat is invisible to
 servers and defeats the common 5-minute idle drop.
 
@@ -109,10 +109,10 @@ later if you actually roam between networks.
 
 ```bash
 # review first
-./scripts/grid-os sshconfig
+./scripts/merc sshconfig
 
 # then install (check for duplicate Host blocks first!)
-./scripts/grid-os sshconfig >> ~/.ssh/config
+./scripts/merc sshconfig >> ~/.ssh/config
 chmod 600 ~/.ssh/config
 ```
 
@@ -139,7 +139,7 @@ investigate rather than typing `yes`.
 
 ## 5. Quickest path when a host is unreachable
 
-1. `./scripts/grid-os status all`
+1. `./scripts/merc status all`
 2. Hostinger box down → **hPanel browser terminal** (works regardless of SSH or firewall)
 3. OCI box down → check instance state in the console; if it is `STOPPED`, start it —
    do not terminate

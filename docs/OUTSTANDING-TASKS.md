@@ -42,8 +42,8 @@ saved under the label `asci-vps-1`.
 Cheap and reversible — all inside this repo:
 - `fleet/inventory.conf` — the `id` column
 - `docs/SOT-fleet-inventory.md`, `SOP-runbook.md`, `vault-credentials.md`, `learning-notes.md`
-- `~/.ssh/config` blocks (`grid-os sshconfig`)
-- Vaultwarden item names (`GRiD-OS.prod.<node>.…`)
+- `~/.ssh/config` blocks (`merc sshconfig`)
+- Vaultwarden item names (`MERC-OS.prod.<node>.…`)
 - Terminus host labels
 
 What does **not** change: the Linux hostname, DNS, Coolify, container names, Tailscale.
@@ -64,7 +64,7 @@ Nothing on the servers themselves is touched.
 **Fix for #1** — create a file that sorts *first*:
 
 ```
-/etc/ssh/sshd_config.d/00-grid-os-hardening.conf
+/etc/ssh/sshd_config.d/00-merc-os-hardening.conf
 ------------------------------------------------
 PasswordAuthentication no
 PermitRootLogin prohibit-password
@@ -107,7 +107,7 @@ Then `sudo sshd -t && sudo systemctl reload ssh`, and **verify**:
 | 21 | Consider enabling ESM on `kami-vps-1` (it is enabled on `asci-vps-1`) |
 | 22 | Add all four hosts to Terminus and install the generated `~/.ssh/config` |
 | 23 | Run the collection prompt (`docs/prompts/collect-vps-design.md`) on both live hosts |
-| 24 | Confirm the SSH auth method for `asci-vps-1`; upload its key to Cloud Shell as `~/.ssh/asci_vps_1` so `grid-os audit` works unaided |
+| 24 | Confirm the SSH auth method for `asci-vps-1`; upload its key to Cloud Shell as `~/.ssh/asci_vps_1` so `merc audit` works unaided |
 
 ---
 

@@ -1,13 +1,13 @@
 # Learning notes
 
 Running log. Newest at the bottom. Written to be read cold, months later, by someone
-who has forgotten all of this. Append with `./scripts/grid-os note "…"`.
+who has forgotten all of this. Append with `./scripts/merc note "…"`.
 
 ---
 
 ## 2026-09-15 02:20 — Fleet CLI built
 
-`scripts/grid-os` is now the front door: `hosts`, `status`, `audit`, `connect`,
+`scripts/merc` is now the front door: `hosts`, `status`, `audit`, `connect`,
 `sshconfig`, `note`, `sot`. It reads `fleet/inventory.conf`, which is the machine-readable
 twin of `docs/SOT-fleet-inventory.md`.
 
@@ -15,7 +15,7 @@ twin of `docs/SOT-fleet-inventory.md`.
 
 ## 2026-09-15 02:20 — A bare TCP connect is not proof a host is up
 
-**Learned the hard way.** `grid-os status` first used
+**Learned the hard way.** `merc status` first used
 `timeout 4 bash -c 'exec 3<>/dev/tcp/IP/22'` and reported `kami-vps-1` and `asci-vps-1`
 both **UP**. That was wrong.
 
@@ -186,3 +186,61 @@ and not a blend of both.
 `kami-vaultwarden` on the OCI box and `asci-vps-vault-01` on the Hostinger box. Two vaults
 means two places to check, two places to forget. Pick one as canonical and either migrate
 or document the split explicitly.
+
+---
+
+## 2026-09-15 03:00 — Pivot to MERC-OS; the estate has a bigger purpose
+
+The infrastructure documented here is the platform for a larger venture: **an autonomous app
+and bot factory**. The estate is renamed **`MERC-OS`**. `GRiD-OS` is retired, though a
+`grid-os` shim keeps old commands working. `une` / `uge` stay as component names —
+`asci-vps-une-core-01` is a real container on the Hostinger box.
+
+Operator is Warren; contact recorded at his explicit direction in `SOT-fleet-inventory.md`
+§0, with a standing warning that no credentials or financial values belong in this repo.
+
+**Consequence for scope:** this is no longer only a server runbook. There is now a business
+layer (the app/bot factory: products, vendors, subscriptions, recurring spend) and a personal
+layer (household, family, finances, property, banking, loans, mortgages, investments, bills,
+insurance, estate). Both are documented as **structure only, never values**.
+
+---
+
+## 2026-09-15 03:00 — The workspace git history reset itself again
+
+Third occurrence. `.git` was re-cloned back to `3738f22 Initial commit`, leaving every file
+present but untracked. The remote still held all 20 commits at `23dd53c`.
+
+Recovery pattern that works, in order:
+1. `git ls-remote origin <branch>` — get the authoritative remote SHA
+2. `git fetch origin <branch>`
+3. Back up the working tree outside the repo
+4. `git reset --hard <remote-sha>`
+5. `diff -rq` backup against the restored tree to prove nothing was lost
+
+**Lesson:** in this environment, treat the remote as the only durable history and the local
+`.git` as disposable. Commit and push in the same action; never leave work sitting only
+locally. Verify with `git status` after a long pause between turns.
+
+---
+
+## 2026-09-15 03:00 — getopts stops at the first non-option
+
+`merc todo add "fix the thing" -d 2026-10-01` swallowed the whole flag string into the text.
+Bash `getopts` stops parsing at the first non-option argument, so flags placed *after* free
+text are silently ignored — no error, just wrong data.
+
+**Fix:** hand-rolled argument loop that accepts flags in any position. Applies to any CLI
+where free text and flags interleave, which is exactly what a "add a reminder" command does.
+
+---
+
+## 2026-09-15 03:00 — Reminders live outside the repo on purpose
+
+`merc todo` writes to `~/.merc/reminders.tsv`, not into the repo. The reminder list is where
+bills, renewals, mortgage reviews and family admin will go — committing that to a shared git
+repo would leak exactly the personal data the rest of the documentation is designed to keep
+out.
+
+**Principle:** the repo holds *structure and cadence*; the vault holds *credentials*; an
+encrypted store or paper in a safe holds *values*. Keep those three apart, always.

@@ -11,6 +11,27 @@ Last updated: 2026-09-15 (audits ran 02:36 UTC on both live hosts)
 
 ---
 
+## 0. Estate owner and identity
+
+| Field | Value |
+|---|---|
+| Operator | **Warren** |
+| Contact | `mercenary.thai97@gmail.com` |
+| Scope | Personal — household, family, finances, property — plus the MERC-OS venture |
+| Venture | **MERC-OS** — the infrastructure layer behind an autonomous app and bot factory |
+| Recorded | 2026-09-15, at the operator's explicit direction |
+
+⚠️ That email address is in a **shared git repository** because the operator asked for it
+after being warned. It is a login identity rather than a secret, but it is personal data —
+remove it if this repo's audience ever widens. Passwords, recovery codes and financial
+details must **never** be added here; see `personal-organiser.md`.
+
+**Estate naming:** `MERC-OS`. Earlier documents used `GRiD-OS`; that name is retired, and
+`grid-os` survives only as a compatibility shim for the CLI. `une` / `uge` remain as
+component references (`asci-vps-une-core-01` is a real container).
+
+---
+
 ## 1. `kami-vps-1` — Oracle Cloud platform node ✅ LIVE
 
 | Field | Value |
@@ -145,7 +166,7 @@ The `99-ssg-ssh.conf` file suggests an SSG/CIS hardening profile was applied, bu
 being overridden by the earlier-sorted cloud-init file. The hardening did not take effect.
 
 **Fix (SOP-09 / SOP-03):** set `PasswordAuthentication no` in a file that sorts *first*, e.g.
-`/etc/ssh/sshd_config.d/00-grid-os-hardening.conf`, then `sshd -t && systemctl reload ssh`.
+`/etc/ssh/sshd_config.d/00-merc-os-hardening.conf`, then `sshd -t && systemctl reload ssh`.
 **Verify with `sudo sshd -T | grep passwordauthentication` → must print `no`.**
 Keep a root shell open until the new session is proven.
 
@@ -222,5 +243,5 @@ fine; an invented IP is not.
 | Disk used | 8.7 G (5%) on OCI · 87 G (45%) on Hostinger |
 | Vaultwarden | **two instances** — decide which is canonical |
 | MCP gateway | **5 MCP containers on asci-vps-1**: grok, github, xero, ukgov, google |
-| Naming scheme | `GRiD-OS.<env>.<node>.<class>.<item>` — see `vault-credentials.md` |
-| Machine inventory | `fleet/inventory.conf` (read by `scripts/grid-os`) |
+| Naming scheme | `MERC-OS.<env>.<node>.<class>.<item>` — see `vault-credentials.md` |
+| Machine inventory | `fleet/inventory.conf` (read by `scripts/merc`) |

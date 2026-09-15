@@ -8,12 +8,12 @@ exist in the vault and *how* to name it, with placeholders to fill in at the vau
 ## 1. The naming format
 
 ```
-GRiD-OS.<env>.<node>.<class>.<item>
+MERC-OS.<env>.<node>.<class>.<item>
 ```
 
 | Segment | Meaning | Allowed values |
 |---|---|---|
-| `GRiD-OS` | fixed prefix — the estate | `GRiD-OS` |
+| `MERC-OS` | fixed prefix — the estate | `MERC-OS` |
 | `<env>` | environment | `prod`, `stg`, `dev`, `lab` |
 | `<node>` | which host, or `fleet` for estate-wide | `kami-vps-1`, `asci-vps-1`, `asci-vps-2`, `asci-vps-3`, `fleet` |
 | `<class>` | kind of credential | `ssh`, `panel`, `os`, `db`, `app`, `api`, `net`, `recovery` |
@@ -22,17 +22,17 @@ GRiD-OS.<env>.<node>.<class>.<item>
 Examples:
 
 ```
-GRiD-OS.prod.kami-vps-1.ssh.privatekey
-GRiD-OS.prod.kami-vps-1.panel.login
-GRiD-OS.prod.asci-vps-1.panel.login
-GRiD-OS.prod.asci-vps-1.os.root
-GRiD-OS.prod.kami-vps-1.app.vaultwarden
-GRiD-OS.fleet.mcp.api.gatewaytoken
+MERC-OS.prod.kami-vps-1.ssh.privatekey
+MERC-OS.prod.kami-vps-1.panel.login
+MERC-OS.prod.asci-vps-1.panel.login
+MERC-OS.prod.asci-vps-1.os.root
+MERC-OS.prod.kami-vps-1.app.vaultwarden
+MERC-OS.fleet.mcp.api.gatewaytoken
 ```
 
 Why this shape: it sorts correctly in Vaultwarden's list view (everything for one node
 groups together), it is unambiguous when read aloud, and it extends cleanly — the `une`
-/ `uge` segments you use in GRiD-OS-une-uge can be carried as an extra tag or appended to
+/ `uge` segments you use in MERC-OS-une-uge can be carried as an extra tag or appended to
 `<env>` without breaking anything.
 
 **Rule:** the node segment must match the `id` in `fleet/inventory.conf` exactly. One
@@ -43,7 +43,7 @@ inventory, one vocabulary.
 ## 2. Folder layout in Vaultwarden
 
 ```
-GRiD-OS/
+MERC-OS/
 ├── 00-Identity/                  master email, recovery codes, MFA seeds
 ├── 01-Hosts/
 │   ├── asci-vps-1/
@@ -68,19 +68,19 @@ Placeholders use `[[FILL: …]]`. **Fill them inside Vaultwarden, never in this 
 
 | Name (Vaultwarden item) | Type | Fields |
 |---|---|---|
-| `GRiD-OS.fleet.identity.email` | Login | user `[[FILL: primary email]]`, password `[[FILL]]`, TOTP ✅ |
-| `GRiD-OS.fleet.recovery.recoverycodes` | Secure Note | `[[FILL: codes, one per line]]` |
+| `MERC-OS.fleet.identity.email` | Login | user `[[FILL: primary email]]`, password `[[FILL]]`, TOTP ✅ |
+| `MERC-OS.fleet.recovery.recoverycodes` | Secure Note | `[[FILL: codes, one per line]]` |
 
 ### `01-Hosts/` — per node, repeat for all four
 
 | Name | Type | Contents |
 |---|---|---|
-| `GRiD-OS.prod.<node>.ssh.privatekey` | **Secure Note** ⚠️ | The **entire** private key block, including `-----BEGIN …-----` and `-----END …-----` lines. Not truncated, no trailing spaces. |
-| `GRiD-OS.prod.<node>.ssh.pubkey` | Secure Note | Public key text. Low risk, handy for pasting into new hosts. |
-| `GRiD-OS.prod.<node>.panel.login` | Login | Hostinger hPanel or OCI console login |
-| `GRiD-OS.prod.<node>.os.root` | Login | Local root/ubuntu password — **console-recovery only**, network password SSH stays off |
-| `GRiD-OS.prod.<node>.recovery.console` | Secure Note | How to reach this box when SSH is down (see §5) |
-| `GRiD-OS.prod.<node>.host.facts` | Secure Note | IP, user, host key fingerprint, plan, renewal date |
+| `MERC-OS.prod.<node>.ssh.privatekey` | **Secure Note** ⚠️ | The **entire** private key block, including `-----BEGIN …-----` and `-----END …-----` lines. Not truncated, no trailing spaces. |
+| `MERC-OS.prod.<node>.ssh.pubkey` | Secure Note | Public key text. Low risk, handy for pasting into new hosts. |
+| `MERC-OS.prod.<node>.panel.login` | Login | Hostinger hPanel or OCI console login |
+| `MERC-OS.prod.<node>.os.root` | Login | Local root/ubuntu password — **console-recovery only**, network password SSH stays off |
+| `MERC-OS.prod.<node>.recovery.console` | Secure Note | How to reach this box when SSH is down (see §5) |
+| `MERC-OS.prod.<node>.host.facts` | Secure Note | IP, user, host key fingerprint, plan, renewal date |
 
 > **Use Secure Note, not Login, for private keys.** A Login item's password field may
 > reflow or truncate long multi-line values. A Secure Note preserves the block verbatim,
@@ -90,25 +90,25 @@ Placeholders use `[[FILL: …]]`. **Fill them inside Vaultwarden, never in this 
 
 | Name | Notes |
 |---|---|
-| `GRiD-OS.prod.kami-vps-1.app.coolify` | Coolify dashboard admin |
-| `GRiD-OS.prod.kami-vps-1.app.vaultwarden` | **This vault.** Admin token + the master password lives here or in `00-Identity` — decide once, document the choice, never store the vault's master password *only* inside the vault. |
-| `GRiD-OS.prod.kami-vps-1.app.portainer` | Portainer admin |
-| `GRiD-OS.prod.asci-vps-1.app.caddy` | Caddy admin API if enabled |
+| `MERC-OS.prod.kami-vps-1.app.coolify` | Coolify dashboard admin |
+| `MERC-OS.prod.kami-vps-1.app.vaultwarden` | **This vault.** Admin token + the master password lives here or in `00-Identity` — decide once, document the choice, never store the vault's master password *only* inside the vault. |
+| `MERC-OS.prod.kami-vps-1.app.portainer` | Portainer admin |
+| `MERC-OS.prod.asci-vps-1.app.caddy` | Caddy admin API if enabled |
 
 ### `03-Databases/`
 
 | Name | Notes |
 |---|---|
-| `GRiD-OS.prod.kami-vps-1.db.coolify` | Coolify Postgres |
-| `GRiD-OS.prod.kami-vps-1.db.kami` | Application Postgres |
+| `MERC-OS.prod.kami-vps-1.db.coolify` | Coolify Postgres |
+| `MERC-OS.prod.kami-vps-1.db.kami` | Application Postgres |
 
 ### `04-API-and-Tokens/`
 
 | Name | Notes |
 |---|---|
-| `GRiD-OS.fleet.mcp.api.gatewaytoken` | MCP gateway token ⬜ not yet created |
-| `GRiD-OS.fleet.net.tailscale` | Tailscale auth key / admin console |
-| `GRiD-OS.fleet.api.oci` | OCI API key + config, if CLI access is ever needed from a new machine |
+| `MERC-OS.fleet.mcp.api.gatewaytoken` | MCP gateway token ⬜ not yet created |
+| `MERC-OS.fleet.net.tailscale` | Tailscale auth key / admin console |
+| `MERC-OS.fleet.api.oci` | OCI API key + config, if CLI access is ever needed from a new machine |
 
 ---
 

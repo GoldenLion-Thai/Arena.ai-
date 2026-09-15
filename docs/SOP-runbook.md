@@ -3,8 +3,8 @@
 Numbered, repeatable procedures. Each states when to use it, the exact steps, and how to
 know it worked. Keep them short enough to follow at 3am.
 
-Conventions: commands assume you are in the repo root and `scripts/grid-os` is on the
-PATH or called as `./scripts/grid-os`.
+Conventions: commands assume you are in the repo root and `scripts/merc` is on the
+PATH or called as `./scripts/merc`.
 
 ---
 
@@ -13,11 +13,11 @@ PATH or called as `./scripts/grid-os`.
 **When:** any time you need a shell.
 
 ```bash
-./scripts/grid-os status all        # is it actually reachable?
-./scripts/grid-os connect <id>      # uses the recorded user, IP and key
+./scripts/merc status all        # is it actually reachable?
+./scripts/merc connect <id>      # uses the recorded user, IP and key
 ```
 
-**It worked when** the prompt hostname matches the `label` in `grid-os hosts`.
+**It worked when** the prompt hostname matches the `label` in `merc hosts`.
 
 **If it fails:**
 
@@ -35,9 +35,9 @@ PATH or called as `./scripts/grid-os`.
 **When:** before any change; after any incident; monthly as routine.
 
 ```bash
-./scripts/grid-os audit <id>
+./scripts/merc audit <id>
 # or
-./scripts/grid-os audit all
+./scripts/merc audit all
 ```
 
 Reports land in `reports/`. For a host the CLI cannot reach (unknown key, password auth):
@@ -169,9 +169,9 @@ readable. Record the date and result in `docs/SOT-fleet-inventory.md`.
 2. Add a row to `fleet/inventory.conf`. Use `UNKNOWN` rather than a guess.
 3. Add the matching section to `docs/SOT-fleet-inventory.md`.
 4. Add the host to Terminus (see `terminus-and-ssh-access.md`) and regenerate config:
-   `./scripts/grid-os sshconfig >> ~/.ssh/config`
+   `./scripts/merc sshconfig >> ~/.ssh/config`
 5. Update DNS A records if the IP changed.
-6. Create its Vaultwarden entries using `GRiD-OS.<env>.<node>.<class>.<item>`.
+6. Create its Vaultwarden entries using `MERC-OS.<env>.<node>.<class>.<item>`.
 7. Run SOP-02 and paste the findings into the SOT.
 8. Baseline it against §6 of `vps-fleet-runbook.md`.
 

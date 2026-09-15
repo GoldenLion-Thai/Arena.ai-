@@ -11,7 +11,7 @@ Read this before touching any server. It contains no keys, no passwords and no O
 ## 1. Fleet inventory
 
 **The authoritative inventory now lives in `docs/SOT-fleet-inventory.md`** (human) and
-`fleet/inventory.conf` (machine, read by `scripts/grid-os`). This file keeps only the
+`fleet/inventory.conf` (machine, read by `scripts/merc`). This file keeps only the
 summary — two places claiming to be the source of truth is how they drift apart.
 
 | # | Name | Provider / plan | Public IP | OS | SSH user | Status |
@@ -26,8 +26,8 @@ summary — two places claiming to be the source of truth is how they drift apar
 Quick view from the CLI:
 
 ```bash
-./scripts/grid-os hosts
-./scripts/grid-os status all
+./scripts/merc hosts
+./scripts/merc status all
 ```
 
 > **Why #3 is different:** `asci-vps-2` was set up in a separate Hostinger account of its
