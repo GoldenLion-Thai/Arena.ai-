@@ -689,6 +689,14 @@ phase_rebuild() {
 EOF
   gate "create the replacement instance from the existing boot volume"
 
+  # The source-details JSON key for "this is a boot volume" is spelled
+  # "sourceType" in most CLI versions but "type" in others. Try the common
+  # one first and silently fall back rather than dying on an unknown field.
+  local sd_a sd_b sd_json tried_alt=0
+  sd_a="{\"sourceType\":\"bootVolume\",\"bootVolumeId\":\"$BOOT_VOLUME_OCID\"}"
+  sd_b="{\"type\":\"bootVolume\",\"bootVolumeId\":\"$BOOT_VOLUME_OCID\"}"
+  sd_json="$sd_a"
+
   local attempt=0 max="${CAPACITY_RETRIES:-20}" new_id="" out=""
   while (( attempt < max )); do
     attempt=$((attempt+1))
@@ -701,12 +709,19 @@ EOF
             --subnet-id "$SUBNET_ID" \
             --assign-public-ip true \
             --ssh-authorized-keys-file "$PUBKEY_FILE" \
-            --source-details "{\"type\":\"bootVolume\",\"bootVolumeId\":\"$BOOT_VOLUME_OCID\"}" 2>&1)" \
+            --source-details "$sd_json" 2>&1)" \
       && { new_id="$(printf '%s' "$out" | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)"; break; }
     if printf '%s' "$out" | grep -qiE 'out of (host )?capacity|capacity|insufficient'; then
       warn "attempt $attempt/$max: no $new_shape capacity in $AD right now."
       warn "Your data is safe - the volume is untouched. Retrying in 60s."
       sleep 60
+      continue
+    fi
+    # a malformed/unknown JSON field is a script bug, not a cloud problem:
+    # swap the key name once before giving up.
+    if (( tried_alt == 0 )); then
+      warn "launch rejected the source-details payload; retrying with the alternate key name"
+      sd_json="$sd_b"; tried_alt=1
       continue
     fi
     echo "$out" >&2
