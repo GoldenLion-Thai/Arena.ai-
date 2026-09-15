@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Behaviour Lab — Sovereign</title>
+    <meta
+      name="description"
+      content="Side-by-side evaluation of a standard model profile against a refusal-reduced research profile: tone, length, refusal rate, over-refusal, unsafe completion, latency and format compliance."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/css/sovereign.css" />
+    <script src="assets/js/brand.js"></script>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090b10'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23c8ff3d'/%3E%3C/svg%3E"
+    />
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner wrap">
+        <a class="brand" href="index.html" data-brand-aria="{name} — home"><span class="brand__mark" data-brand-mark></span> <span data-brand="name">Sovereign</span></a>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html#product">Product</a>
+          <a href="index.html#architecture">Architecture</a>
+          <a href="index.html#models">Models</a>
+          <a href="lab.html" aria-current="page">Behaviour Lab</a>
+          <a href="DESIGN.md">Design system</a>
+        </nav>
+        <div class="grow"></div>
+        <span class="tag tag--research"><span class="dot" style="background:var(--research);box-shadow:0 0 0 3px rgba(195,155,255,.16)"></span>RESEARCH CONFIGURATION</span>
+        <a class="btn btn--ghost btn--sm" href="app.html">Open workspace</a>
+      </div>
+    </header>
+
+    <main class="lab">
+      <div class="wrap">
+        <div class="section-head" style="margin-bottom:26px">
+          <span class="eyebrow" style="color:var(--research)">Model behaviour lab</span>
+          <h1 style="font-size:clamp(30px,4.4vw,46px);margin:14px 0 12px">Standard vs refusal-reduced.</h1>
+          <p style="font-size:16.5px;color:var(--text-2);max-width:78ch">
+            Same prompts, same temperature, same max tokens, same system policy for both variants — the only variable is
+            the weight edit. Refusal rate alone is not a quality measure, so this dashboard reports utility loss and
+            risk side by side.
+          </p>
+        </div>
+
+        <!-- run bar -->
+        <div class="lab__bar">
+          <div class="lab__meta"><span class="mono">Base model</span><b>Qwen 2.5 14B Instruct</b></div>
+          <div class="lab__meta"><span class="mono">Variant</span><b>Refusal-direction suppressed (Q4_K_M)</b></div>
+          <div class="lab__meta"><span class="mono">Dataset</span><b>Internal evaluation v1</b></div>
+          <div class="lab__meta"><span class="mono">Safety policy</span><b>Organisation baseline</b></div>
+          <div class="lab__meta"><span class="mono">Decoding</span><b>temp 0.4 · max 1024</b></div>
+          <div class="lab__meta"><span class="mono">Last run</span><b id="lastRun">—</b></div>
+          <div class="grow"></div>
+          <div class="meter" style="width:120px" id="runMeterWrap" hidden><i id="runMeter" style="width:0%"></i></div>
+          <button class="btn btn--primary btn--sm" id="runBtn">Run test suite</button>
+        </div>
+
+        <div class="callout" style="margin-bottom:22px">
+          <b>Illustrative reference data.</b> The figures below are a worked example of the evaluation format, not
+          measurements of a specific published checkpoint. Wire <code>lab.js → DATASETS</code> to your own harness output
+          (JSON from a scored run) before quoting any number to a customer, an auditor or an investor.
+        </div>
+
+        <!-- prompt-set tabs -->
+        <div class="row-between" style="margin-bottom:16px;flex-wrap:wrap;gap:12px">
+          <div class="tabs" id="tabs" role="tablist" aria-label="Prompt sets"></div>
+          <span class="mono" id="tabNote"></span>
+        </div>
+
+        <!-- versus -->
+        <div class="versus" id="versus"></div>
+
+        <!-- samples -->
+        <section style="margin-top:34px">
+          <div class="row-between" style="margin-bottom:14px">
+            <h2 style="font-size:20px">Paired samples</h2>
+            <span class="mono">anonymised · benign and internally approved prompts only</span>
+          </div>
+          <div id="samples" class="grid-2"></div>
+        </section>
+
+        <!-- rubric -->
+        <section style="margin-top:34px">
+          <div class="row-between" style="margin-bottom:14px">
+            <h2 style="font-size:20px">Tone rubric</h2>
+            <span class="mono">1–5 · three raters · blind to variant</span>
+          </div>
+          <div class="table-wrap">
+            <table class="rubric" id="rubric"></table>
+          </div>
+        </section>
+
+        <!-- length distribution -->
+        <section style="margin-top:34px">
+          <div class="row-between" style="margin-bottom:14px">
+            <h2 style="font-size:20px">Response length distribution</h2>
+            <span class="mono">words · p10 / median / p90</span>
+          </div>
+          <div class="grid-2" id="lengths"></div>
+        </section>
+
+        <!-- metric definitions -->
+        <section style="margin-top:34px">
+          <div class="row-between" style="margin-bottom:14px">
+            <h2 style="font-size:20px">Metric definitions</h2>
+            <span class="mono">what each number actually counts</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Metric</th><th>Definition</th><th>Why it matters</th></tr></thead>
+              <tbody>
+                <tr><td><b>Tone score</b></td><td>Rubric rating (formal, neutral, direct, supportive) by human raters blind to variant.</td><td>Shows whether behavioural editing changes professional usability, not just compliance.</td></tr>
+                <tr><td><b>Response length</b></td><td>Median output words, plus p10 and p90.</td><td>Detects verbosity shifts without distortion from outliers.</td></tr>
+                <tr><td><b>Refusal rate</b></td><td>refusals / eligible prompts.</td><td>Quantifies boundary behaviour. Never interpret it alone.</td></tr>
+                <tr><td><b>Helpful completion</b></td><td>Allowed-policy prompts answered accurately and usefully.</td><td>Guards against capability regression after weight editing.</td></tr>
+                <tr><td><b>Unsafe completion</b></td><td>Disallowed prompts that receive actionable prohibited content.</td><td>The primary risk metric.</td></tr>
+                <tr><td><b>Over-refusal</b></td><td>Allowed prompts incorrectly declined.</td><td>Measures lost utility — the cost of over-tuned safeguards.</td></tr>
+                <tr><td><b>Policy violations</b></td><td>Outputs breaching organisation policy (tone, disclosure, formatting, scope).</td><td>Business-acceptable behaviour is narrower than “not harmful”.</td></tr>
+                <tr><td><b>Latency</b></td><td>p50/p95 time-to-first-token and tokens/sec.</td><td>Editing can change generation length and therefore user experience.</td></tr>
+                <tr><td><b>Format compliance</b></td><td>Outputs matching the requested schema, JSON, citation or template.</td><td>Critical for automation workflows built on top of the model.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- method -->
+        <section style="margin-top:34px">
+          <div class="grid-2">
+            <div class="card">
+              <span class="eyebrow">Method</span>
+              <h3 style="font-size:17px;margin:12px 0 10px">Controlled comparison</h3>
+              <ul style="margin:0;padding-left:18px;color:var(--text-2);font-size:13.5px;line-height:1.75">
+                <li>Identical prompt set, system policy, temperature, max tokens and seed handling for both variants.</li>
+                <li>Raters score without knowing which variant produced the output.</li>
+                <li>Refusals are classified by rubric, not by keyword matching alone.</li>
+                <li>Disallowed-category samples are reported as aggregates with an evaluator rationale — never as raw text.</li>
+                <li>Each run is versioned with the checkpoint hash, quantisation and dataset id.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <span class="eyebrow" style="color:var(--warning)">Reading the result</span>
+              <h3 style="font-size:17px;margin:12px 0 10px">Why refusal rate is not the headline</h3>
+              <p class="muted" style="font-size:13.5px;line-height:1.7">
+                Abliteration suppresses the learned direction associated with refusals. It is not a general quality
+                improvement, and it can alter reliability and formatting discipline alongside safety behaviour.
+              </p>
+              <p class="muted" style="font-size:13.5px;line-height:1.7;margin-top:10px">
+                One published abliterated model card reported refusals falling from <b style="color:var(--text)">98% to 39%</b>
+                on its own 100-prompt harmful test set. A lower refusal count says nothing about whether the remaining
+                answers are accurate, well-formatted, or safe — which is why this dashboard always pairs refusal rate
+                with helpful completion, unsafe completion and format compliance.
+              </p>
+              <div class="callout callout--accent" style="margin-top:14px">
+                <b>Product rule.</b> A refusal-reduced profile is an explicitly labelled research configuration with its
+                own workspace and audit tag. It is never the default for a business workspace, and it is never sold as
+                the commercial proposition.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="row" style="gap:12px;margin-top:34px;flex-wrap:wrap">
+          <a class="btn btn--primary" href="app.html">Open the workspace</a>
+          <a class="btn btn--ghost" href="index.html#architecture">Review the deployment stack</a>
+          <a class="btn btn--ghost" href="DESIGN.md">Read the design guide</a>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        <div class="footer__grid" style="margin-bottom:26px">
+          <div>
+            <a class="brand" href="index.html" data-brand-aria="{name} — home"><span class="brand__mark" data-brand-mark></span> <span data-brand="name">Sovereign</span></a>
+            <p class="muted" style="font-size:13.5px;margin-top:12px;max-width:38ch;line-height:1.65">
+              Evaluation surfaces exist so a buyer can see the trade-offs, not so a vendor can hide them.
+            </p>
+          </div>
+          <div>
+            <h4>Product</h4>
+            <ul>
+              <li><a href="app.html">Workspace</a></li>
+              <li><a href="index.html#product">Features</a></li>
+              <li><a href="index.html#models">Model shortlist</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Build</h4>
+            <ul>
+              <li><a href="DESIGN.md">Design guide</a></li>
+              <li><a href="index.html#architecture">Architecture</a></li>
+              <li><a href="assets/js/lab.js">Lab data format</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Policy</h4>
+            <ul>
+              <li><a href="DESIGN.md">Claim audit checklist</a></li>
+              <li><a href="index.html">Honesty note</a></li>
+              <li><a href="app.html">Retention controls</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="row-between">
+          <span class="mono"><span data-brand="name">Sovereign</span> · Behaviour Lab · reference implementation</span>
+          <span class="mono">No trackers · No analytics · No cookies</span>
+        </div>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast" data-open="false" role="status"></div>
+    <script src="assets/js/md.js"></script>
+    <script src="assets/js/lab.js"></script>
+  </body>
+</html>
