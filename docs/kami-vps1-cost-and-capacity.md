@@ -109,3 +109,50 @@ rebuild, no risk to KAMi-VPS-1.
 - Do not enable password SSH.
 - Billed block-volume usage is evidence that the account has been consuming storage continuously; it is
   not evidence of what is *on* the disk. Only the health check answers that.
+
+---
+
+## 5. Update — 15 Sep 2026: real disk numbers, and one thing to check
+
+Access is restored, so the actual usage figure is finally available instead of an estimate:
+
+```
+/dev/sda1   193G   8.7G   185G   5% /
+```
+
+**8.7 GB used out of 200 GB allocated.** The volume is oversized by roughly 190 GB, and you
+are being billed for the allocation, not the contents. Now that the three preconditions are
+met (SSH access ✅, verified backup ✅, real disk numbers ✅) the size question can be
+answered properly rather than guessed at — but read the constraint first.
+
+**Constraint: OCI boot volumes cannot be shrunk in place.** Getting to a smaller disk means
+creating a new, smaller boot volume from the backup and migrating onto it. That is a
+planned operation, not a quick fix, and it is the only thing on this box that could
+actually reduce the ~£8.15/month. It is worth doing eventually; it is not urgent, and it
+should not be attempted the same week the server was rebuilt.
+
+### The thing to check now: an orphaned helper boot volume
+
+The temporary VM `kami-helper` was terminated. Terminating an instance does **not** always
+delete its boot volume — if the helper's ~45 GB boot volume survived, it is still there,
+still unused, and still billing every month. That is the one change today that would
+*increase* the bill.
+
+```bash
+oci bv boot-volume list --compartment-id "<tenancy OCID>" --query 'data[*].{"Name":"display-name","GB":"size-in-gbs","State":"lifecycle-state"}'
+```
+
+You expect exactly one row: `kami-VPS-1 (Boot Volume)`, 200 GB, `AVAILABLE` or `ATTACHED`.
+Any second row — especially an unattached one — is an orphan. Delete it, and the bill drops.
+
+### Correcting a claim you may have been given
+
+You were told the storage is free because 200 GB sits within the Always Free allowance.
+**Your own invoices contradict that** — you have been billed £4.07 storage + £2.72
+performance = £6.79 net (£8.15 with VAT) every month for exactly this 200 GB. Whatever the
+free allowance is doing in this tenancy, it is not zeroing this line.
+
+What *is* true: **today's work added nothing to the bill.** The rebuild reused your
+existing 200 GB volume via `--source-details '{"sourceType":"bootVolume",...}'` — no second
+volume was created, so there is no extra 100 GB and no new charge. The expected bill is
+unchanged at roughly **£8.15/month**, minus whatever the orphan check above recovers.

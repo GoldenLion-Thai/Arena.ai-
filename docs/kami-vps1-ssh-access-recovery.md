@@ -1,5 +1,64 @@
 # KAMi-VPS-1 — SSH Access Recovery (corrected runbook)
 
+> ## ✅ RESOLVED — 15 Sep 2026, access restored, zero data loss
+>
+> **The one command that did it, from Cloud Shell (one line):**
+>
+> ```bash
+> oci compute instance launch \
+>   --compartment-id "<tenancy OCID>" \
+>   --availability-domain "CqyW:UK-LONDON-1-AD-1" \
+>   --display-name "kami-VPS-1" \
+>   --shape "VM.Standard.A1.Flex" \
+>   --shape-config '{"ocpus":4,"memoryInGBs":24}' \
+>   --source-details '{"sourceType":"bootVolume","bootVolumeId":"<200 GB boot volume OCID>"}' \
+>   --subnet-id "<subnet OCID>" \
+>   --ssh-authorized-keys-file ~/.ssh/kami_vps.pub \
+>   --assign-public-ip true
+> ```
+>
+> **Everything below the line is the reasoning and the dead ends, kept so nobody re-walks them.**
+>
+> ### What actually worked, in order
+>
+> 1. Instance was **terminated** by another assistant's advice (against the standing "stop only"
+>    instruction). The 200 GB boot volume survived: `AVAILABLE`, `is-hydrated: true`, AD-1.
+> 2. `oci compute instance launch` with `--source-details '{"sourceType":"bootVolume",...}'`
+>    recreated the VM around the **existing** disk. No new volume was created.
+> 3. **cloud-init did inject the key.** The pasted key landed in `metadata.ssh_authorized_keys`
+>    and was written to disk on first boot of the new instance. The helper-attach path
+>    (`bash oci-recover-access.sh rebuild`) was **not needed** — keep it as the fallback.
+> 4. Helper VM `kami-helper` was terminated afterwards to release the capacity it was holding.
+>
+> ### Two traps that cost the most time
+>
+> - **`--source-boot-volume-id` is not a real OCI CLI flag.** Suggestions to use it produce a
+>   usage error that looks like a permissions problem. The real parameter is `--source-details`,
+>   and the discriminator key inside that JSON is `sourceType` (some CLI versions want `type`).
+> - **Bracketed paste.** Pasted text arrives wrapped in `^[[200~ … ~`, so `sudo apt update`
+>   becomes `^[[200~sudo apt update~` and the shell reports `sudo: command not found`. The
+>   command is fine — **type it**, or paste one line at a time. `sudo` is present and working.
+>
+> ### The host key changed — that is expected, not a hijack
+>
+> Old fingerprint `SHA256:AC9LZ…`, new fingerprint `SHA256:ctjfO828…`. The new instance
+> regenerated its SSH host keys. The disk is provably the original:
+> `Last login: Mon May 11 14:03:33 2026`, hostname `kami-vps-1`, 8.7 GB in use, and the
+> Coolify stack came back healthy.
+>
+> ### Verified state after recovery
+>
+> ```
+> Host: kami-vps-1          User: ubuntu
+> PRETTY_NAME="Ubuntu 24.04.4 LTS"   aarch64
+> /dev/sda1   193G   8.7G   185G   5% /
+> ```
+>
+> Containers up: coolify, coolify-db, coolify-redis, coolify-realtime, coolify-sentinel,
+> kami-vaultwarden, kami-postgres, kami-redis, coolify-proxy, portainer_agent.
+
+---
+
 **Instance:** `kami-VPS-1` · **Region:** `uk-london-1` · **AD-1 / FD-3`
 **Public IP:** `130.162.187.135` · **Private IP:** `10.0.0.62` · **Username:** `ubuntu`
 **Image:** `Canonical-Ubuntu-24.04-aarch64-2026.03.31-0` · **Shape:** `VM.Standard.A1.Flex` (4 OCPU / 24 GB)
