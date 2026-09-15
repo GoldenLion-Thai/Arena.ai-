@@ -117,3 +117,72 @@ state and made full recovery possible.
 ## 2026-09-15 02:34
 
 fleet docs scaffolded: SOT, SOPs, vault naming, terminus, learning notes
+
+---
+
+## 2026-09-15 02:40 — Both live hosts audited; three findings worth keeping
+
+**1. sshd config order matters more than content.** On `asci-vps-1` three files disagreed:
+
+```
+50-cloud-init.conf        PasswordAuthentication yes
+60-cloudimg-settings.conf PasswordAuthentication no
+99-ssg-ssh.conf           PasswordAuthentication yes
+```
+
+`sshd_config.d/*.conf` is included in **lexical order**, and sshd uses the **first value it
+obtains**. So `50-…` wins → password auth is **ON** for root on a public IP. The SSG/CIS
+hardening file `99-…` was applied but silently overridden — the hardening never took effect.
+
+**Lesson:** never audit SSH posture with `grep` on the config files. Always read the
+*effective* value with `sshd -T`. A hardening file that sorts last is decoration. When
+adding a hardening override, name it `00-…` so it sorts first.
+
+**2. An audit label is data, not decoration.** An audit was run on `kami-vps-1` with
+`AUDIT_LABEL=asci-vps-1`, producing `/home/ubuntu/vps-audit-asci-vps-1-….txt` containing
+kami-vps-1's facts. A report with the wrong name is worse than no report — it will be
+trusted later. Always set the label, always check it before walking away.
+
+**3. Two hosts, two very different machines.**
+
+| | kami-vps-1 | asci-vps-1 |
+|---|---|---|
+| Arch | aarch64 Neoverse-N1 | x86_64 AMD EPYC 9354P |
+| Swap | **0 Gi** | 4 Gi |
+| Disk used | 8.7 G (5%) | 87 G (45%) |
+| Containers | 10 (Coolify platform) | 13 (MCP ×5, n8n, Stalwart mail, nginx) |
+| Tailscale | 100.90.39.36 | **interface up, no IP** |
+
+Binaries are not interchangeable between them. Anything built for one must be rebuilt for
+the other.
+
+---
+
+## 2026-09-15 02:40 — The MCP gateway question, answered
+
+It is not one service. `asci-vps-1` runs **five** MCP containers, each `python:3.11-slim`:
+
+```
+asci-vps-mcp-grok    asci-vps-mcp-github    asci-vps-mcp-xero
+asci-vps-mcp-ukgov   asci-vps-mcp-google
+```
+
+Alongside `asci-vps-une-core-01` (`node:20-alpine` on `127.0.0.1:3001`) — which looks like
+the une/uge core the naming scheme references. Worth a dedicated design doc.
+
+---
+
+## 2026-09-15 02:40 — KVM 2 → KVM 4 upgrade confirmed
+
+The Hostinger box was upgraded from KVM 2 (2 vCPU / 8 GB / 100 GB) to KVM 4. Live values
+confirm it took effect: **4 cores, 15 Gi RAM, 193 Gi disk**. KVM 2 would show 2 cores and
+~97 Gi. Note the disk grew too — worth confirming with Hostinger that billing matches KVM 4
+and not a blend of both.
+
+---
+
+## 2026-09-15 02:40 — Two Vaultwarden instances exist
+
+`kami-vaultwarden` on the OCI box and `asci-vps-vault-01` on the Hostinger box. Two vaults
+means two places to check, two places to forget. Pick one as canonical and either migrate
+or document the split explicitly.
