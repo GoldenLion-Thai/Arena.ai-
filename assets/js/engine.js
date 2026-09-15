@@ -1,18 +1,16 @@
 /* ============================================================================
-   engine.js — streaming completion engine.
+   engine.js — the on-device demo responder.
 
-   Two transports, one interface:
-     1. `local`   — deterministic on-device demo responder (no network at all).
-                    Used by default so the workspace is honest about "local only".
-     2. `remote`  — real SSE against any OpenAI-compatible /v1/chat/completions
-                    endpoint (Ollama, vLLM, TGI, LiteLLM gateway). Read with a
-                    streaming body reader; abortable via AbortController.
+   Deterministic, offline, and clearly labelled as such in the UI: it exists so
+   the workspace is usable (and honestly "local only") before you deploy any
+   inference. Real endpoints live in gateway.js — Ollama native ndjson and
+   OpenAI-compatible SSE — and both return the same result shape.
 
-   Rendering contract for the UI:
+   Rendering contract shared by every transport:
      onStage(label)      → real pipeline stages only, never decorative
-     onDelta(text)       → buffered; UI flushes every ~48ms, not per token
-     onDone(result)      → { text, tokens, ttftMs, totalMs, tokensPerSec, sources }
-     onError(err)
+     onDelta(text)       → buffered; the UI flushes every ~48ms, not per token
+     result              → { text, tokens, ttftMs, totalMs, tokensPerSec, sources,
+                             transport, endpoint?, servedBy?, runtime? }
    ========================================================================== */
 
 (function () {
@@ -123,90 +121,6 @@
     };
   }
 
-  /* ------------------------------------------------------ transport: remote */
-
-  async function runRemote({ prompt, history, model, cfg, onStage, onDelta, signal }) {
-    const t0 = performance.now();
-    const url = cfg.baseUrl.replace(/\/+$/, "") + "/v1/chat/completions";
-    onStage(`Connecting to ${cfg.baseUrl.replace(/^https?:\/\//, "")}`);
-
-    let res;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        signal,
-        headers: Object.assign(
-          { "Content-Type": "application/json" },
-          cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}
-        ),
-        body: JSON.stringify({
-          model: cfg.model || model.short,
-          stream: true,
-          temperature: cfg.temperature ?? 0.4,
-          max_tokens: cfg.maxTokens ?? 1200,
-          messages: [
-            ...(cfg.system ? [{ role: "system", content: cfg.system }] : []),
-            ...history.slice(-12).map((m) => ({ role: m.role === "ai" ? "assistant" : m.role, content: m.content })),
-            { role: "user", content: prompt },
-          ],
-        }),
-      });
-    } catch (e) {
-      if (e.name === "AbortError") throw e;
-      throw new Error(
-        `Could not reach ${url}. For Ollama, set OLLAMA_ORIGINS to allow this page's origin, and confirm the host is reachable from your browser (not from the sandbox).`
-      );
-    }
-
-    if (!res.ok) throw new Error(`Gateway responded ${res.status} ${res.statusText}`);
-    if (!res.body) throw new Error("Endpoint did not return a streaming body. Disable stream or use a compatible runtime.");
-
-    onStage("Generating response");
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let text = "";
-    let ttft = null;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() || "";
-      for (const line of lines) {
-        const s = line.trim();
-        if (!s.startsWith("data:")) continue;
-        const payload = s.slice(5).trim();
-        if (payload === "[DONE]") continue;
-        try {
-          const j = JSON.parse(payload);
-          const delta =
-            j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.text ?? j.message?.content ?? "";
-          if (delta) {
-            if (ttft === null) ttft = performance.now() - t0;
-            text += delta;
-            onDelta(delta);
-          }
-        } catch {
-          /* keep-alive comment or partial frame — ignore */
-        }
-      }
-    }
-
-    const totalMs = performance.now() - t0;
-    return {
-      text,
-      tokens: Math.round(text.length / 4),
-      promptTokens: Math.round(prompt.length / 4),
-      ttftMs: Math.round(ttft ?? totalMs),
-      totalMs: Math.round(totalMs),
-      tokensPerSec: Math.max(1, Math.round(text.length / 4 / Math.max(0.001, (totalMs - (ttft || 0)) / 1000))),
-      sources: [],
-      transport: "remote",
-    };
-  }
-
   function sleep(ms, signal) {
     return new Promise((resolve, reject) => {
       const id = setTimeout(resolve, ms);
@@ -222,5 +136,5 @@
     });
   }
 
-  window.SOV_ENGINE = { runLocal, runRemote, sleep };
+  window.SOV_ENGINE = { runLocal, sleep };
 })();

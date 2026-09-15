@@ -19,6 +19,7 @@
   const MODEL_BY_ID = window.SOV_MODEL_BY_ID;
   const MODES = window.SOV_MODES;
   const MODE_BY_ID = window.SOV_MODE_BY_ID;
+  const Gateway = window.SOV_GATEWAY;
 
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -77,7 +78,6 @@
     pendingRefs: [],
     stream: null,
     pinned: true,
-    gateway: null, // in-memory only, never persisted
   };
 
   /* ------------------------------------------------- retention-aware store
@@ -184,13 +184,8 @@
     state.telemetry = s.telemetry === true;
     state.retention = typeof s.retention === "number" ? s.retention : 30;
 
-    // Gateway credentials live in sessionStorage at most — never localStorage,
-    // never in prompt context.
-    try {
-      state.gateway = JSON.parse(sessionStorage.getItem("sov:gateway") || "null");
-    } catch {
-      state.gateway = null;
-    }
+    // Non-secret gateway config lives on disk; an API key lives in the tab only.
+    Gateway.load();
 
     bindStatic();
     paintChrome();
@@ -258,10 +253,25 @@
       $(".dot", p).className = "dot dot--" + MODE_BY_ID[effective].dot;
     }
 
+    paintGateway();
     paintVault();
     paintStats();
     const c = $("#composer");
     if (c && document.activeElement !== c) c.focus({ preventScroll: true });
+  }
+
+  function paintGateway() {
+    const d = Gateway.describe();
+    const chip = $("#gwChip");
+    if (!chip) return;
+    $("#gwChipLabel").textContent =
+      d.state === "demo" ? "DEMO" : d.state === "ok" ? "GATEWAY LIVE" : d.state === "error" ? "GATEWAY DOWN" : "GATEWAY SET";
+    const dot = $("#gwDot");
+    dot.className =
+      "dot " +
+      (d.state === "ok" ? "dot--local" : d.state === "error" ? "dot--external" : d.state === "demo" ? "dot--cloud" : "");
+    chip.title = d.detail;
+    $("#gwChipSub").textContent = d.detail;
   }
 
   async function paintVault() {
@@ -496,7 +506,13 @@
     if (meta.tokensPerSec != null) bits.push(`${meta.tokensPerSec} tok/s`);
     if (meta.tokens != null) bits.push(`${meta.tokens} tokens`);
     if (meta.totalMs != null) bits.push(`${(meta.totalMs / 1000).toFixed(1)} s`);
-    bits.push(meta.transport === "remote" ? "gateway" : "local runtime");
+    if (meta.transport && meta.transport.startsWith("gateway")) {
+      bits.push("gateway · " + (meta.endpoint || ""));
+      if (meta.servedBy) bits.push(meta.servedBy);
+      if (meta.runtime && meta.runtime.prefillMs) bits.push(`prefill ${meta.runtime.prefillMs} ms`);
+    } else {
+      bits.push("local runtime");
+    }
     if (meta.stopped) bits.push("stopped");
     metrics.innerHTML = bits.map((b) => `<span>${MD.escape(b)}</span>`).join("");
     host.appendChild(metrics);
@@ -695,21 +711,16 @@
     state.stream = { controller, live, flushTimer };
 
     try {
-      const gwReady = Boolean(state.gateway && state.gateway.baseUrl);
-      const useRemote =
-        gwReady &&
-        (state.model.location === "external" ||
-          (state.model.location === "cloud" && state.gateway.useForAll));
-      if (state.model.location === "external" && !gwReady) {
-        setStage("No gateway configured — using on-device demo responder");
-        toast("Set Settings → Model gateway to reach a real endpoint");
+      const viaGateway = Gateway.routes(state.model);
+      if (state.model.location === "external" && !Gateway.isConfigured()) {
+        setStage("No gateway configured — using the on-device demo responder");
+        toast("Settings → Model gateway: choose a connection to reach a real endpoint");
       }
-      if (useRemote) {
-        result = await Engine.runRemote({
+      if (viaGateway) {
+        result = await Gateway.stream({
           prompt,
           history: state.messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
           model: state.model,
-          cfg: state.gateway,
           onStage: setStage,
           onDelta,
           signal: controller.signal,
@@ -744,6 +755,9 @@
     const meta = {
       modelId: state.model.id,
       transport: result ? result.transport : "local",
+      endpoint: result ? result.endpoint : undefined,
+      servedBy: result ? result.model : undefined,
+      runtime: result ? result.runtime : undefined,
       tokens: result ? result.tokens : Math.round(finalText.length / 4),
       promptTokens: result ? result.promptTokens : undefined,
       ttftMs: result ? result.ttftMs : Math.round(firstDelta || performance.now() - startedAt),
@@ -1027,7 +1041,7 @@
     const host = $("#modelList");
     const q = ($("#modelSearch").value || "").toLowerCase();
     host.innerHTML = "";
-    const groups = ["Recommended", "Specialist", "Advanced"];
+    const groups = ["Your endpoint", "Recommended", "Specialist", "Advanced"];
     groups.forEach((g) => {
       const items = MODELS.filter(
         (m) =>
@@ -1038,7 +1052,7 @@
       if (!items.length) return;
       const label = document.createElement("div");
       label.className = "picker__group";
-      label.textContent = g;
+      label.textContent = g === "Your endpoint" ? `Your endpoint · ${Gateway.locationLabel()}` : g;
       host.appendChild(label);
 
       items.forEach((m) => {
@@ -1172,33 +1186,121 @@
     $("#retention").value = String(state.retention);
     $("#telemetryToggle").setAttribute("aria-pressed", String(state.telemetry));
     $("#telemetryPayload").hidden = !state.telemetry;
-
-    const g = state.gateway || {};
-    $("#gwUrl").value = g.baseUrl || "";
-    $("#gwModel").value = g.model || "";
-    $("#gwSystem").value = g.system || "";
-    $("#gwTemp").value = g.temperature ?? 0.4;
-    $("#gwMax").value = g.maxTokens ?? 1200;
-    $("#gwKey").value = g.apiKey || "";
-    $("#gwUseForAll").setAttribute("aria-pressed", String(Boolean(g.useForAll)));
-    $("#gwKeyNote").textContent = g.apiKey
-      ? "Key held in this tab's memory only. It is sent as an Authorization header to your endpoint and is never written into prompt context or local storage."
-      : "No key stored. Keys are never placed in prompt context.";
+    renderGatewaySettings();
   }
 
-  function saveGateway() {
-    state.gateway = {
+  /* ---- gateway ---- */
+
+  function renderGatewaySettings() {
+    const cfg = Gateway.cfg;
+    const preset = Gateway.PRESETS.find((p) => p.id === cfg.preset) || Gateway.PRESETS[0];
+
+    $("#gwPreset").innerHTML = Gateway.PRESETS.map(
+      (p) => `<option value="${p.id}"${p.id === cfg.preset ? " selected" : ""}>${MD.escape(p.label)}</option>`
+    ).join("");
+    $("#gwHint").textContent = preset.hint;
+    $("#gwUrl").value = cfg.baseUrl || "";
+    $("#gwUrl").disabled = cfg.preset === "demo";
+    $("#gwRoute").value = cfg.route;
+    $("#gwModel").value = cfg.model || "";
+    $("#gwSystem").value = cfg.system || "";
+    $("#gwTemp").value = cfg.temperature;
+    $("#gwMax").value = cfg.maxTokens;
+    $("#gwKeep").value = cfg.keepAlive || "5m";
+    $("#gwKey").value = cfg.apiKey || "";
+    $("#gwKeyNote").textContent = cfg.apiKey
+      ? "Key held for this tab only (sessionStorage). Sent as an Authorization header to your endpoint; never written to disk, never placed in prompt context."
+      : "No key stored. Ollama needs none on a private network. Keys are never placed in prompt context.";
+    $("#gwCors").hidden = !(cfg.preset === "ollama-local" || cfg.preset === "ollama-openai");
+
+    paintGatewayStatus();
+    renderDiscovered();
+  }
+
+  function paintGatewayStatus() {
+    const d = Gateway.describe();
+    const tag = $("#gwStatusTag");
+    tag.className =
+      "tag " + (d.state === "ok" ? "tag--accent" : d.state === "error" ? "tag--warning" : d.state === "demo" ? "" : "tag--action");
+    tag.textContent = d.label;
+    $("#gwStatusDetail").textContent = d.detail;
+    paintGateway();
+  }
+
+  function renderDiscovered() {
+    const host = $("#gwModels");
+    const probe = Gateway.lastProbe;
+    if (!probe || !probe.models || !probe.models.length) {
+      host.innerHTML = "";
+      return;
+    }
+    host.innerHTML =
+      `<div class="picker__group" style="margin-top:14px">Models discovered on this endpoint</div>` +
+      probe.models
+        .map(
+          (m) => `<div class="flow__item">
+            <span class="flow__k">▸</span>
+            <span class="grow">
+              <span class="flow__t">${MD.escape(m.id)}</span>
+              <span class="flow__d">${[m.params, m.quant, m.family, m.size ? (m.size / 1073741824).toFixed(1) + " GB" : ""]
+                .filter(Boolean)
+                .join(" · ") || "no metadata reported"}</span>
+            </span>
+            <button class="btn btn--ghost btn--sm" data-use="${MD.escape(m.id)}">Use</button>
+          </div>`
+        )
+        .join("");
+    $$("[data-use]", host).forEach((b) =>
+      b.addEventListener("click", () => {
+        const id = b.dataset.use;
+        Gateway.save({ model: id });
+        const published = window.SOV_MODEL_BY_ID["endpoint:" + id];
+        if (published) {
+          state.model = published;
+          persist();
+        }
+        renderGatewaySettings();
+        renderModelPicker();
+        paintChrome();
+        toast(`Now serving ${id} from ${Gateway.locationLabel()}`);
+      })
+    );
+  }
+
+  function saveGateway(opts) {
+    Gateway.save({
       baseUrl: $("#gwUrl").value.trim(),
       model: $("#gwModel").value.trim(),
       system: $("#gwSystem").value.trim(),
       temperature: parseFloat($("#gwTemp").value) || 0.4,
       maxTokens: parseInt($("#gwMax").value, 10) || 1200,
+      keepAlive: $("#gwKeep").value.trim() || "5m",
+      route: $("#gwRoute").value,
       apiKey: $("#gwKey").value.trim(),
-      useForAll: $("#gwUseForAll").getAttribute("aria-pressed") === "true",
-    };
-    sessionStorage.setItem("sov:gateway", JSON.stringify(state.gateway));
-    toast("Gateway saved for this tab");
-    renderSettings();
+    });
+    paintGatewayStatus();
+    if (!Gateway.isConfigured()) {
+      toast("Inference source: on-device demo responder");
+      renderGatewaySettings();
+      return;
+    }
+    toast("Gateway saved" + (opts && opts.silent ? "" : " · probing…"));
+    renderGatewaySettings();
+    return probeGateway();
+  }
+
+  async function probeGateway() {
+    const btn = $("#gwProbe");
+    btn.disabled = true;
+    btn.textContent = "Probing…";
+    const r = await Gateway.probe();
+    btn.disabled = false;
+    btn.textContent = "Probe endpoint";
+    renderGatewaySettings();
+    if ($("#sheet-models").dataset.open === "true") renderModelPicker();
+    if (r.ok) toast(`Endpoint reachable in ${r.ms} ms · ${r.models.length} model${r.models.length === 1 ? "" : "s"} discovered`);
+    else toast(r.error);
+    return r;
   }
 
   /* ---- vault ---- */
@@ -1469,12 +1571,28 @@
       persist();
       renderSettings();
     });
-    $("#gwSave").addEventListener("click", saveGateway);
-    $("#gwTest").addEventListener("click", testGateway);
-    $("#gwUseForAll").addEventListener("click", (e) => {
-      const b = e.currentTarget;
-      b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true"));
+    $("#gwSave").addEventListener("click", () => saveGateway());
+    $("#gwProbe").addEventListener("click", () => {
+      saveGateway({ silent: true });
     });
+    $("#gwPreset").addEventListener("change", (e) => {
+      Gateway.applyPreset(e.target.value);
+      // a preset carries its own transport and base URL; keep the model choice
+      renderGatewaySettings();
+      paintChrome();
+    });
+    $("#gwRoute").addEventListener("change", (e) => {
+      Gateway.save({ route: e.target.value });
+      paintChrome();
+      toast(
+        e.target.value === "all"
+          ? "Every model now routes through your gateway"
+          : e.target.value === "cloud"
+          ? "Private-cloud models route through your gateway"
+          : "Only external and discovered models use the gateway"
+      );
+    });
+    $("#gwChip").addEventListener("click", () => openSheet("settings"));
     $("#clearAll").addEventListener("click", async (e) => {
       const b = e.currentTarget;
       if (confirmArmed !== "clearAll") {
@@ -1513,7 +1631,7 @@
       });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = "sovereign-workspace-export.json";
+      a.download = ((window.SOV_BRAND && window.SOV_BRAND.SLUG) || "workspace") + "-export.json";
       a.click();
       toast("Full workspace exported");
     });
@@ -1556,32 +1674,7 @@
       .join("");
   }
 
-  async function testGateway() {
-    const g = state.gateway || {};
-    if (!g.baseUrl) return toast("Set a base URL first");
-    const btn = $("#gwTest");
-    btn.disabled = true;
-    btn.textContent = "Probing…";
-    const t0 = performance.now();
-    try {
-      const res = await fetch(g.baseUrl.replace(/\/+$/, "") + "/v1/models", {
-        headers: g.apiKey ? { Authorization: "Bearer " + g.apiKey } : {},
-      });
-      const ms = Math.round(performance.now() - t0);
-      if (res.ok) {
-        const j = await res.json().catch(() => ({}));
-        const ids = (j.data || []).map((m) => m.id).slice(0, 6);
-        toast(`Reachable in ${ms} ms · ${ids.length ? ids.join(", ") : "no models listed"}`);
-      } else toast(`Endpoint answered ${res.status} in ${ms} ms`);
-    } catch (e) {
-      toast("Unreachable from this browser — check host, CORS/OLLAMA_ORIGINS");
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Test connection";
-    }
-  }
-
-  // Idempotent: some hosts (and test harnesses) can fire DOMContentLoaded twice.
+  // Idempotent: some hosts (and test harnesses) fire DOMContentLoaded twice.
   let booted = false;
   document.addEventListener("DOMContentLoaded", () => {
     if (booted) return;
@@ -1589,5 +1682,5 @@
     boot();
   });
 
-  window.SOV_APP = { state, toast, openSheet, Store, persistOn, mem };
+  window.SOV_APP = { state, toast, openSheet, Store, persistOn, mem, saveGateway, probeGateway };
 })();

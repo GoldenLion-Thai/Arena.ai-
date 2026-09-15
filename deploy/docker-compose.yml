@@ -1,0 +1,52 @@
+# UI + same-origin gateway proxy + Ollama, on one host.
+# Ollama is NOT published: it lives on the internal compose network only, and
+# the browser reaches it exclusively through the proxy on port 8080.
+#
+#   cd deploy && docker compose up -d
+#
+# Requires the NVIDIA container toolkit on GPU shapes. Drop the `deploy` block
+# for a CPU pilot (a 7B-8B Q4 model is usable, slowly, on 16 GB+ of RAM).
+
+services:
+  sovereign:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ..:/app:ro
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      # compose-network DNS name, not a public host
+      OLLAMA_URL: "http://ollama:11434"
+      GATEWAY_PREFIX: "/gateway/"
+    command: node server.js
+    ports:
+      - "8080:8080" # put nginx or an OCI load balancer with TLS in front of this
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434" # reachable inside the compose network only
+      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: "q8_0"
+      OLLAMA_MODELS: "/models"
+    volumes:
+      - ollama-models:/models
+    # deliberately no `ports:` — unreachable from outside this host
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  ollama-models:

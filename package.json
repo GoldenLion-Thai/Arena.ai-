@@ -2,11 +2,14 @@
   "name": "sovereign-private-ai",
   "version": "1.0.0",
   "private": true,
-  "description": "Sovereign — reference implementation of a privacy-first, local-first, chat-first private LLM interface.",
+  "description": "Sovereign \u2014 reference implementation of a privacy-first, local-first, chat-first private LLM interface.",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/smoke.mjs"
+    "test": "node tests/smoke.mjs && node tests/gateway.mjs",
+    "test:smoke": "node tests/smoke.mjs",
+    "test:gateway": "node tests/gateway.mjs",
+    "mock": "node tests/mock-ollama.mjs 11500"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",

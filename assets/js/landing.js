@@ -130,14 +130,16 @@
 
   /* ------------------------------------------------------------ terminal */
 
+  const CLI = (window.SOV_BRAND && window.SOV_BRAND.SLUG) || "sovereign";
+
   const SCRIPT = [
-    { t: "type", cls: "prompt", text: "$ sovereign status" },
+    { t: "type", cls: "prompt", text: `$ ${CLI} status` },
     { t: "line", text: "◉ runtime    ollama 0.5.x · qwen2.5:14b-instruct-q4_K_M", cls: "ok" },
     { t: "line", text: "◉ location   this device · no egress · UK-EU-WEST" },
     { t: "line", text: "◉ vault      AES-GCM 256 · PBKDF2 210k · unlocked", cls: "ok" },
     { t: "line", text: "◉ index      412 chunks · pgvector (local) · 6 sources" },
     { t: "line", text: "" },
-    { t: "type", cls: "prompt", text: '$ ask "compare the indemnity caps in MSA-2024 and the DPA"' },
+    { t: "type", cls: "prompt", text: `$ ${CLI} ask "compare the indemnity caps in MSA-2024 and the DPA"` },
     { t: "line", text: "⟳ retrieving approved sources … 2 matches", cls: "flag" },
     { t: "line", text: "⟳ generating … ttft 286 ms · 41 tok/s · 0 external calls", cls: "flag" },
     { t: "line", text: "› MSA-2024 caps aggregate liability at 12 months' fees, with" },
@@ -145,7 +147,7 @@
     { t: "line", text: "› The DPA schedules processor obligations but omits a" },
     { t: "line", text: "› sub-processor notice window — add 30 days plus audit right [2]." },
     { t: "line", text: "" },
-    { t: "type", cls: "prompt", text: "$ egress --check --last 24h" },
+    { t: "type", cls: "prompt", text: `$ ${CLI} egress --check --last 24h` },
     { t: "line", text: "✓ 0 external requests · 0 telemetry events · 0 training uploads", cls: "ok" },
   ];
 

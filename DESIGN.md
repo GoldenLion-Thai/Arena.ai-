@@ -14,7 +14,11 @@ This guide is implemented, not just described. Every rule below has a correspond
 | Model registry with data-handling metadata | `assets/js/models.js` |
 | Client-side encryption of local history | `assets/js/vault.js` |
 | Local-first conversation store | `assets/js/db.js` |
-| Streaming engine (SSE + on-device demo) | `assets/js/engine.js` |
+| On-device demo responder (offline default) | `assets/js/engine.js` |
+| Real inference: Ollama ndjson + OpenAI SSE, probe, discovery | `assets/js/gateway.js` |
+| Same-origin streaming proxy + static server | `server.js` |
+| Brand constant, logo mark, titles, favicon | `assets/js/brand.js` |
+| OCI/VPC deployment: systemd, compose, nginx, checklist | `deploy/` |
 | Safe markdown rendering for streamed output | `assets/js/md.js` |
 | Behaviour benchmark dashboard | `lab.html`, `assets/js/lab.js` |
 
@@ -436,10 +440,53 @@ identity attracts the wrong evaluation criteria and the wrong counsel.
 
 ---
 
-## 13. What the test suite verifies
+## 13. Connecting real inference
 
-`npm test` runs `tests/smoke.mjs` in jsdom with a real IndexedDB and WebCrypto shim, driving the actual
-UI rather than unit-testing helpers. 96 assertions across the three pages:
+The demo responder is the honest default: no network, clearly labelled. Real deployments go through
+`gateway.js`, which speaks two transports behind one interface:
+
+| Transport | Endpoint | Why |
+| --- | --- | --- |
+| `ollama` | `POST /api/chat` (ndjson) | Reports its own `eval_count`, `eval_duration`, `prompt_eval_duration` — measured by the runtime, not estimated from characters |
+| `openai` | `POST /v1/chat/completions` (SSE) | vLLM, TGI, LiteLLM, llama.cpp server, and Ollama's compat layer |
+
+Rules that came out of building it:
+
+- **Measure TTFT from request start**, not from the first byte of the response body. Measuring after
+  the headers arrive reports 0 ms and hides exactly the latency you care about.
+- **Prefer runtime-reported numbers.** When Ollama returns `eval_count`, use it; fall back to a
+  character estimate only when the runtime reports nothing.
+- **Parse streams defensively**: buffer decoder output, split on newlines, keep the trailing fragment,
+  ignore SSE comments and keep-alives, tolerate JSON that arrives split across reads.
+- **Route policy is explicit**: `external` (only external/discovered models), `cloud` (private-cloud
+  models too), or `all` (replace the demo responder). Models discovered by probing always use the
+  gateway — they exist nowhere else.
+- **Discovery beats documentation.** Probing `/api/tags` or `/v1/models` and injecting the results into
+  the picker means the user chooses from what the endpoint actually has, with real size, parameter
+  count and quantisation, instead of a list that went stale at build time.
+- **Same-origin proxy over CORS.** A browser cannot reach a private subnet and Ollama rejects
+  cross-origin calls unless `OLLAMA_ORIGINS` allows them. Forwarding `/gateway/*` from the app origin
+  removes CORS, works behind a preview host or LB, and keeps 11434 unpublished. In nginx the two
+  settings that matter are `proxy_buffering off` and a long `proxy_read_timeout` — without them tokens
+  arrive in one buffered flush at the end.
+- **Secret hygiene**: non-secret config in `localStorage`, API key in `sessionStorage` for the tab,
+  sent only as an `Authorization` header, never in prompt context, never on disk.
+- **Failures surface in the transcript.** A dead endpoint produces a readable message naming the
+  likely cause (unreachable host or blocked cross-origin request) and the fix, not a spinner.
+
+## 14. Brand as a constant
+
+`assets/js/brand.js` holds `NAME` and the SVG `MARK`. Legal name, slug, page titles, meta description,
+wordmarks, aria labels and the favicon all derive from them, and `apply()` injects the mark into every
+`.brand__mark` slot. Body copy stays in the pages — copy should be edited as copy — but nothing
+*identifying* is hardcoded anywhere else. The smoke test patches that one constant to `QuietCompute`
+and asserts no stale brand text survives in the rendered DOM, which is what makes "rename is one
+constant" a verified claim rather than a hopeful one.
+
+## 15. What the test suite verifies
+
+`npm test` runs two suites in jsdom with a real IndexedDB and WebCrypto shim, driving the actual UI
+rather than unit-testing helpers. 159 assertions:
 
 | Area | Asserted behaviour |
 | --- | --- |
@@ -452,8 +499,10 @@ UI rather than unit-testing helpers. 96 assertions across the three pages:
 | Retention | `0 days` switches writes to memory, storage labelled session-only, existing history still readable, nothing new on disk, sidebar marks `RAM`, memory messages never reach IndexedDB |
 | Commands | Slash menu opens, `/knowledge` toggles retrieval, `/stats` reports storage and vault state |
 | Lab | 4 tabs, 2 variants, ≥18 metrics, samples + rationale for permitted sets, 7-criterion rubric, disallowed tab withholds raw samples, **96% refusal coloured good not bad**, re-run updates a second-precise timestamp |
+| Brand | Wordmark/title/meta/favicon/mark injected; patching `NAME` alone renames every page with no stale text left |
+| Gateway | Proxy streams incrementally with `X-Accel-Buffering: no`; 502 explains the fix; probe discovers and injects models; endpoint marker proves real serving; eval stats become the metrics; TTFT from request start; SSE `usage` honoured; dead endpoint surfaces in the transcript; demo mode works offline |
 
-## 14. Pre-launch claim audit
+## 16. Pre-launch claim audit
 
 Before publishing any of this externally, verify each claim against the deployed system:
 
@@ -464,6 +513,8 @@ Before publishing any of this externally, verify each claim against the deployed
 - [ ] Transfer risk assessment / UK IDTA in place for anything crossing the UK–EU boundary.
 - [ ] Audit log captures actor, workspace, model, checkpoint, timestamp and retention decision.
 - [ ] Keys live in a secrets manager or OS keychain; rotation and revocation tested.
+- [ ] Authentication sits in front of the UI (nginx `auth_request`, OIDC proxy, or an app tier) — the
+      reference build ships none and must not be exposed without it.
 - [ ] Latency targets measured under realistic concurrency, not a cold single-user box.
 - [ ] Research/abliterated profiles are workspace-gated, tagged in the audit log, and never default.
 - [ ] The page itself ships no trackers, analytics or third-party beacons.

@@ -34,7 +34,7 @@ function ok(name, cond, extra) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function loadPage(file) {
+function loadPage(file, opts) {
   const html = readFileSync(join(ROOT, file), "utf8");
   const vc = new VirtualConsole();
   const errors = [];
@@ -65,7 +65,10 @@ function loadPage(file) {
   for (const src of srcs) {
     const p = join(ROOT, src);
     if (!existsSync(p)) throw new Error(`missing script ${src}`);
-    w.eval(readFileSync(p, "utf8"));
+    let code = readFileSync(p, "utf8");
+    const patch = opts && opts.patch && opts.patch[src];
+    if (patch) code = patch(code);
+    w.eval(code);
   }
   const inline = [...html.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   for (const code of inline) w.eval(code);
@@ -124,6 +127,51 @@ async function testLanding() {
   await wait(20);
   ok("obsidian theme applies", w.getComputedStyle(doc.documentElement).getPropertyValue("--canvas").trim() === "#0a0a0a");
   ok("no page errors", errors.length === 0, errors.join(" | "));
+}
+
+async function testBrand() {
+  console.log("\nbrand — single-constant rename");
+
+  // default brand
+  const base = loadPage("index.html");
+  await wait(200);
+  ok("wordmark is injected from brand.js", base.doc.querySelector(".brand [data-brand='name']").textContent === base.w.SOV_BRAND.NAME);
+  ok("document title derives from the brand", base.doc.title === `${base.w.SOV_BRAND.NAME} — ${base.w.SOV_BRAND.TAGLINE}`, base.doc.title);
+  ok("meta description is brand-managed", base.doc.querySelector('meta[name="description"]').content === base.w.SOV_BRAND.DESCRIPTION);
+  ok("logo mark is an injected SVG", base.doc.querySelectorAll(".brand__mark svg").length >= 2);
+  ok("favicon generated from the brand", /^data:image\/svg\+xml,/.test(base.doc.querySelector('link[rel="icon"]').href));
+  ok("footer legal name and year injected", /Private AI/.test(base.doc.querySelector("[data-brand='legal']").textContent) && base.doc.querySelector("[data-brand='year']").textContent === String(new Date().getFullYear()));
+  ok("brand aria labels resolved", /home/.test(base.doc.querySelector(".brand").getAttribute("aria-label")), base.doc.querySelector(".brand").getAttribute("aria-label"));
+  ok("no page errors", base.errors.length === 0, base.errors.join(" | "));
+
+  // the rename claim: change ONE constant and every identifying string follows
+  const renamed = loadPage("index.html", {
+    patch: {
+      "assets/js/brand.js": (code) => {
+        const out = code.replace('const NAME = "Sovereign";', 'const NAME = "QuietCompute";');
+        if (out === code) throw new Error("brand.js NAME constant not found — rename point moved");
+        return out;
+      },
+    },
+  });
+  await wait(200);
+  const d = renamed.doc;
+  ok("one constant renames the wordmark", [...d.querySelectorAll("[data-brand='name']")].every((e) => e.textContent === "QuietCompute"));
+  ok("one constant renames the title", d.title.startsWith("QuietCompute — "), d.title);
+  ok("no stale brand text left in the rendered page", !/Sovereign/i.test(d.body.textContent.replace(/sovereign.css|sovereign-/gi, "")), (d.body.textContent.match(/\w*Sovereign\w*/gi) || []).slice(0, 3).join(","));
+  ok("app page renames too", (() => {
+    const app = loadPage("app.html", {
+      patch: { "assets/js/brand.js": (c) => c.replace('const NAME = "Sovereign";', 'const NAME = "QuietCompute";') },
+    });
+    return app.doc.title === "QuietCompute — Private workspace";
+  })(), "app title");
+  ok("lab page renames too", (() => {
+    const lab = loadPage("lab.html", {
+      patch: { "assets/js/brand.js": (c) => c.replace('const NAME = "Sovereign";', 'const NAME = "QuietCompute";') },
+    });
+    return lab.doc.title === "Behaviour Lab — QuietCompute";
+  })(), "lab title");
+  ok("no page errors after rename", renamed.errors.length === 0, renamed.errors.join(" | "));
 }
 
 async function testWorkspace() {
@@ -375,6 +423,7 @@ async function testLab() {
   console.log("Sovereign smoke tests — jsdom + fake-indexeddb");
   const started = Date.now();
   try {
+    await testBrand();
     await testLanding();
     await testWorkspace();
     await testLab();

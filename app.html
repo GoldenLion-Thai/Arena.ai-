@@ -15,6 +15,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="assets/css/sovereign.css" />
+    <script src="assets/js/brand.js"></script>
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090b10'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23c8ff3d'/%3E%3C/svg%3E"
@@ -30,8 +31,8 @@
             ☰
           </button>
 
-          <a class="brand" href="index.html" title="Back to overview">
-            <span class="brand__mark"></span> SOVEREIGN
+          <a class="brand" href="index.html" title="Back to overview" data-brand-aria="{name} — overview">
+            <span class="brand__mark" data-brand-mark></span> <span data-brand="name">Sovereign</span>
           </a>
 
           <span class="mono" style="color:var(--border-strong)">/</span>
@@ -44,6 +45,14 @@
           </select>
 
           <div class="grow"></div>
+
+          <button class="chip" id="gwChip" title="Inference gateway status" style="max-width:230px">
+            <span class="dot dot--cloud" id="gwDot"></span>
+            <span style="min-width:0">
+              <span class="mono" id="gwChipLabel">DEMO</span>
+              <span class="dim" id="gwChipSub" style="display:block;font-size:10.5px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No gateway configured · nothing leaves this device</span>
+            </span>
+          </button>
 
           <button class="pstate" id="pstate" data-state="local" title="Inspect the data boundary">
             <span class="dot dot--local"></span>
@@ -252,31 +261,66 @@
           </div>
         </div>
 
-        <div class="picker__group">Model gateway (OpenAI-compatible)</div>
+        <div class="picker__group">Model gateway — real inference</div>
+
+        <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <span class="tag" id="gwStatusTag">Demo responder</span>
+          <span class="dim" id="gwStatusDetail" style="font-size:12px"></span>
+        </div>
+
+        <div class="field">
+          <label for="gwPreset">Connection</label>
+          <select id="gwPreset"></select>
+          <span class="help" id="gwHint"></span>
+        </div>
+
         <div class="field">
           <label for="gwUrl">Base URL</label>
-          <input id="gwUrl" type="text" placeholder="http://your-host:11434  ·  https://gateway.internal/v1" autocomplete="off" />
-          <span class="help">Ollama, vLLM, TGI or LiteLLM. Your browser must be able to reach it; for Ollama set <code>OLLAMA_ORIGINS</code> to allow this origin.</span>
+          <input id="gwUrl" type="text" placeholder="/gateway  ·  http://10.0.0.12:11434  ·  https://llm.internal" autocomplete="off" spellcheck="false" />
+          <span class="help">
+            A leading <code>/</code> means same-origin: <code>server.js</code> forwards <code>/gateway/*</code> to
+            <code>OLLAMA_URL</code>. That is the supported production path — the browser never contacts the model host
+            directly, so there is no CORS problem and the model port stays unpublished.
+          </span>
         </div>
-        <div class="grid-2" style="gap:12px">
-          <div class="field"><label for="gwModel">Model name</label><input id="gwModel" type="text" placeholder="qwen2.5:14b-instruct-q4_K_M" autocomplete="off" /></div>
-          <div class="field"><label for="gwKey">API key (optional)</label><input id="gwKey" type="password" placeholder="not stored on disk" autocomplete="off" /></div>
+
+        <div class="field">
+          <label for="gwRoute">Which models use it</label>
+          <select id="gwRoute">
+            <option value="external">Only external and endpoint-discovered models</option>
+            <option value="cloud">Private-cloud models too</option>
+            <option value="all">Every model — replace the demo responder entirely</option>
+          </select>
+          <span class="help">Models discovered by probing are always served by the gateway; they exist nowhere else.</span>
         </div>
-        <div class="field"><label for="gwSystem">System policy</label><textarea id="gwSystem" rows="2" placeholder="You are an internal assistant. Cite sources. Refuse nothing that is permitted by organisation policy."></textarea></div>
+
         <div class="grid-2" style="gap:12px">
+          <div class="field"><label for="gwModel">Default model name</label><input id="gwModel" type="text" placeholder="qwen2.5:14b-instruct-q4_K_M" autocomplete="off" spellcheck="false" /></div>
+          <div class="field"><label for="gwKey">API key (optional)</label><input id="gwKey" type="password" placeholder="tab memory only" autocomplete="off" /></div>
+        </div>
+
+        <div class="field"><label for="gwSystem">System policy</label><textarea id="gwSystem" rows="3"></textarea></div>
+
+        <div class="grid-3" style="gap:12px">
           <div class="field"><label for="gwTemp">Temperature</label><input id="gwTemp" type="number" step="0.1" min="0" max="2" /></div>
           <div class="field"><label for="gwMax">Max tokens</label><input id="gwMax" type="number" step="64" min="64" max="32768" /></div>
+          <div class="field"><label for="gwKeep">keep_alive</label><input id="gwKeep" type="text" placeholder="10m" autocomplete="off" spellcheck="false" /></div>
         </div>
-        <button class="switch" id="gwUseForAll" aria-pressed="false">
-          <span><span style="font-size:13.5px;font-weight:500">Route private-cloud models through this gateway</span>
-          <span class="help" style="display:block">Off: only “Custom endpoint” uses it. On: cloud-location models use it too.</span></span>
-          <span class="switch__track"></span>
-        </button>
-        <p class="help" id="gwKeyNote" style="margin:8px 0 12px"></p>
+
+        <p class="help" id="gwKeyNote" style="margin:2px 0 12px"></p>
+
+        <div class="callout" id="gwCors" hidden style="margin-bottom:12px">
+          <b>Direct browser → Ollama needs CORS.</b> On the Ollama host set
+          <code>OLLAMA_ORIGINS</code> to include this page's origin (or <code>*</code> on a machine you trust), then
+          restart the service. Prefer the same-origin proxy instead — it avoids the problem entirely.
+        </div>
+
         <div class="row">
-          <button class="btn btn--primary" id="gwSave">Save gateway</button>
-          <button class="btn btn--ghost" id="gwTest">Test connection</button>
+          <button class="btn btn--primary" id="gwSave">Save &amp; probe</button>
+          <button class="btn btn--ghost" id="gwProbe">Probe endpoint</button>
         </div>
+
+        <div id="gwModels"></div>
 
         <div class="picker__group">Local data</div>
         <div class="row" style="flex-wrap:wrap">
@@ -311,6 +355,7 @@
     <script src="assets/js/db.js"></script>
     <script src="assets/js/md.js"></script>
     <script src="assets/js/models.js"></script>
+    <script src="assets/js/gateway.js"></script>
     <script src="assets/js/engine.js"></script>
     <script src="assets/js/app.js"></script>
     <script>
