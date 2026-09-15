@@ -10,19 +10,44 @@ Read this before touching any server. It contains no keys, no passwords and no O
 
 ## 1. Fleet inventory
 
-| # | Name | Provider / plan | Public IP | OS | SSH user | Access | Status |
-|---|------|-----------------|-----------|----|----------|--------|--------|
-| 1 | `kami-VPS-1` (a.k.a. kami-VPS-asci) | Oracle Cloud — `VM.Standard.A1.Flex` 4 OCPU / 24 GB, 200 GB boot volume | `132.145.57.78` | Ubuntu 24.04.4 LTS aarch64 | `ubuntu` | key only (`kami_vps`) | **LIVE**, verified 2026-09-15 |
-| 2 | `asci-vps-1` (ASCI-VPS-1 \| core) | Hostinger **KVM 4** — 4 vCPU AMD EPYC / 16 GB RAM / 200 GB NVMe | `72.61.203.79` *(from a Terminus screenshot — unconfirmed)* | ⬜ to confirm | ⬜ to confirm | ⬜ key / password / hPanel terminal | ⬜ not yet audited |
-| 3 | `asci-vps-2` | ⬜ to confirm — believed Hostinger, **different account** from #1/#2 | ⬜ unknown | ⬜ | ⬜ | ⬜ | ⬜ not reachable from this Cloud Shell |
-| 4 | `asci-vps-3` | ⬜ to confirm | ⬜ unknown | ⬜ | ⬜ | ⬜ | ⬜ |
+**The authoritative inventory now lives in `docs/SOT-fleet-inventory.md`** (human) and
+`fleet/inventory.conf` (machine, read by `scripts/grid-os`). This file keeps only the
+summary — two places claiming to be the source of truth is how they drift apart.
 
-⬜ = needs confirming. Fill these in as they are verified; do not guess an IP and act on it.
+| # | Name | Provider / plan | Public IP | OS | SSH user | Status |
+|---|------|-----------------|-----------|----|----------|--------|
+| 1 | `kami-VPS-1` | Oracle Cloud — `VM.Standard.A1.Flex` 4 OCPU / 24 GB, 200 GB | `132.145.57.78` | Ubuntu 24.04.5 aarch64 | `ubuntu` | **LIVE**, verified 2026-09-15. ⚠️ reboot pending |
+| 2 | `asci-vps-1` | Hostinger **KVM 4** — 4 vCPU / 16 GB / 200 GB NVMe | `72.61.203.79` ✅ confirmed | Ubuntu 24.04.5 x86_64 | **`root`** | **LIVE**, verified 2026-09-15. ⚠️ 2 security updates pending |
+| 3 | `asci-vps-2` | Hostinger **separate account** | ⬜ UNKNOWN | ⬜ | `root` (likely) | ⬜ not reached |
+| 4 | `asci-vps-3` | ⬜ | ⬜ UNKNOWN | ⬜ | ⬜ | ⬜ existence unconfirmed |
+
+⬜ = a real gap. Fill it in only when verified; never guess an IP and act on it.
+
+Quick view from the CLI:
+
+```bash
+./scripts/grid-os hosts
+./scripts/grid-os status all
+```
 
 > **Why #3 is different:** `asci-vps-2` was set up in a separate Hostinger account of its
 > own. The OCI Cloud Shell used for #1 is locked to the OCI tenancy and cannot see it.
 > Auditing it means logging into that other account (or connecting straight to its IP from
 > a machine that holds its key).
+
+---
+
+## 1b. Document map
+
+| Need | Document |
+|---|---|
+| Full specs per host | `SOT-fleet-inventory.md` |
+| Step-by-step procedures | `SOP-runbook.md` |
+| Terminus, persistent logins, tmux | `terminus-and-ssh-access.md` |
+| Vaultwarden layout, naming, placeholders | `vault-credentials.md` |
+| Mistakes made and lessons learned | `learning-notes.md` |
+| OCI-only deep recovery detail | `kami-vps1-ssh-access-recovery.md` |
+| OCI billing analysis | `kami-vps1-cost-and-capacity.md` |
 
 ---
 
@@ -144,12 +169,39 @@ curl -fsSL -o vps-healthcheck-readonly.sh \
 
 ## 7. Known open items
 
-- [ ] Confirm `asci-vps-1` IP (`72.61.203.79` is from a screenshot, never verified)
-- [ ] Confirm OS and SSH user on `asci-vps-1`
-- [ ] Determine access method for `asci-vps-1` — key, password, or hPanel terminal
+**Urgent (do these first)**
+
+- [ ] **Reboot `kami-vps-1`** — `*** System restart required ***` since 2026-09-15 (SOP-04)
+- [ ] **2 security updates pending on `asci-vps-1`** (SOP-03)
+
+**Access and inventory**
+
+- [x] `asci-vps-1` IP confirmed — `72.61.203.79`, hostname `ASCi-VPS-1`, user `root`
+- [ ] Confirm SSH auth method for `asci-vps-1` — key or password
+- [ ] Record `asci-vps-1` host key fingerprint
 - [ ] Locate `asci-vps-2` in its own Hostinger account and record its IP
-- [ ] Run the audit on #2 and #3
-- [ ] Check for an orphaned boot volume left by the terminated `kami-helper` (see
-      `kami-vps1-cost-and-capacity.md`, section 5)
-- [ ] Apply the 45 pending updates on `kami-VPS-1` **after** the audit, deliberately
+- [ ] Confirm whether `asci-vps-3` exists at all
+- [ ] Run the full audit on `asci-vps-1`, then `-2` and `-3`
+- [ ] Add all four hosts to Terminus (SOP-08)
+
+**Platform and cost**
+
+- [ ] Check for an orphaned boot volume left by the terminated `kami-helper` (SOP-10)
 - [ ] Update DNS A records to the new `132.145.57.78`
+- [ ] Confirm hPanel firewall rules and snapshots on `asci-vps-1`
+- [ ] Note Hostinger renewal date and price for `asci-vps-1`
+- [ ] Set a local console-recovery password on `kami-vps-1` (`sudo passwd ubuntu`)
+
+**Credentials**
+
+- [ ] Create the Vaultwarden folder structure and items per `vault-credentials.md`
+- [ ] Store the `kami_vps` private key as a Secure Note, then delete loose copies
+- [ ] Decide where the vault's own master password lives offline
+
+**Optional / later**
+
+- [ ] Install `tmux` on both live hosts and standardise on it
+- [ ] Consider Mosh only if roaming between networks becomes normal
+- [ ] Evaluate shrinking the 200 GB OCI volume now that real usage is known (8.7 GB) —
+      boot volumes cannot be shrunk in place, so this is a build-and-migrate project,
+      not a quick win

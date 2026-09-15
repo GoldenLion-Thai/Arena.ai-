@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+# GRiD-OS fleet CLI
+#
+# One command to see, reach, audit and connect to every server in the estate.
+# Reads fleet/inventory.conf. Contains and stores no secrets.
+#
+#   ./grid-os help
+#   ./grid-os hosts
+#   ./grid-os status [all|<id>]
+#   ./grid-os audit  <id>|all
+#   ./grid-os connect <id>
+#   ./grid-os sshconfig          # emit an ~/.ssh/config block for Terminus/CLI
+#   ./grid-os note "something worth remembering"
+#   ./grid-os sot                # open/print the source-of-truth inventory
+#
+# Every mutating or network action prints what it is about to do first.
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INV="${GRID_INVENTORY:-$ROOT/fleet/inventory.conf}"
+AUDIT="$ROOT/scripts/vps-healthcheck-readonly.sh"
+REPORTS="${GRID_REPORTS:-$ROOT/reports}"
+NOTES="$ROOT/docs/learning-notes.md"
+SSH_PORT="${GRID_SSH_PORT:-22}"
+
+C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
+C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_BLUE=$'\033[34m'
+no_colour() { C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; }
+[ -t 1 ] || no_colour
+[ "${NO_COLOR:-}" = "1" ] && no_colour
+
+die()  { printf '%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+warn() { printf '%swarn:%s  %s\n'  "$C_YELLOW" "$C_RESET" "$*" >&2; }
+info() { printf '%s%s%s\n'         "$C_DIM" "$*" "$C_RESET"; }
+
+[ -f "$INV" ] || die "inventory not found: $INV"
+
+# --------------------------------------------------------------- inventory
+# Loads rows into parallel arrays. Skips blanks and comments.
+declare -a F_ID F_LABEL F_PROVIDER F_PLAN F_IP F_USER F_KEY F_ROLE F_STATUS F_NOTES
+
+load_inventory() {
+  local line n=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    IFS='|' read -r f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 <<< "$line"
+    F_ID[n]="$f1"; F_LABEL[n]="$f2"; F_PROVIDER[n]="$f3"; F_PLAN[n]="$f4"
+    F_IP[n]="$f5"; F_USER[n]="$f6"; F_KEY[n]="$f7"; F_ROLE[n]="$f8"
+    F_STATUS[n]="$f9"; F_NOTES[n]="${f10:-}"
+    n=$((n+1))
+  done < "$INV"
+  [ "$n" -gt 0 ] || die "inventory parsed but contains no hosts"
+}
+
+find_host() {
+  local want="$1" i
+  for i in "${!F_ID[@]}"; do
+    if [ "${F_ID[$i]}" = "$want" ] || [ "${F_LABEL[$i]}" = "$want" ]; then printf '%s' "$i"; return 0; fi
+  done
+  return 1
+}
+
+targets_for() {
+  local arg="${1:-all}" i out=()
+  if [ "$arg" = "all" ]; then
+    for i in "${!F_ID[@]}"; do out+=("${F_ID[$i]}"); done
+  else
+    out+=("$arg")
+  fi
+  printf '%s\n' "${out[@]}"
+}
+
+# ---------------------------------------------------------------- commands
+cmd_hosts() {
+  load_inventory
+  printf '%sGRiD-OS fleet — %s host(s)%s\n\n' "$C_BOLD" "${#F_ID[@]}" "$C_RESET"
+  printf '%-13s %-14s %-24s %-17s %-9s %-9s %s\n' \
+    "ID" "LABEL" "PROVIDER" "PUBLIC IP" "USER" "STATUS" "ROLE"
+  printf '%s\n' "------------------------------------------------------------------------------------------------"
+  local i
+  for i in "${!F_ID[@]}"; do
+    local colour="$C_RESET"
+    case "${F_STATUS[$i]}" in
+      live)    colour="$C_GREEN" ;;
+      unknown) colour="$C_YELLOW" ;;
+    esac
+    printf '%-13s %-14s %-24s %-17s %-9s %s%-9s%s %s\n' \
+      "${F_ID[$i]}" "${F_LABEL[$i]}" "${F_PROVIDER[$i]}" "${F_IP[$i]}" \
+      "${F_USER[$i]}" "$colour" "${F_STATUS[$i]}" "$C_RESET" "${F_ROLE[$i]}"
+  done
+  printf '\n'
+  for i in "${!F_ID[@]}"; do
+    [ -n "${F_NOTES[$i]}" ] && printf '  %s%s%s\n    %s\n\n' "$C_BOLD" "${F_ID[$i]}" "$C_RESET" "${F_NOTES[$i]}"
+  done
+}
+
+# probe_ssh <ip> <port>  ->  "UP|<ssh banner>" | "DOWN" | "INDETERMINATE"
+#
+# Deliberately does NOT trust a bare TCP connect. Some networks (CI sandboxes,
+# corporate egress proxies) accept every outbound connection and reset it as soon
+# as data is sent, which makes a connect-only check report "UP" for IPs that are
+# switched off. Requiring a real SSH banner is what makes the result trustworthy.
+probe_ssh() {
+  local ip="$1" port="$2"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$ip" "$port" <<'PY'
+import socket, sys
+ip, port = sys.argv[1], int(sys.argv[2])
+try:
+    s = socket.create_connection((ip, port), timeout=5)
+except Exception:
+    print("DOWN"); sys.exit()
+try:
+    s.settimeout(4)
+    d = s.recv(256)
+    if not d:
+        s.sendall(b"SSH-2.0-grid-os-probe\r\n")
+        d = s.recv(256)
+    s.close()
+except Exception:
+    print("INDETERMINATE"); sys.exit()
+lines = d.decode("utf-8", "replace").strip().splitlines()
+if lines and lines[0].startswith("SSH-"):
+    print("UP|" + lines[0])
+else:
+    print("INDETERMINATE")
+PY
+  else
+    # No python: connect only, and say so rather than claiming certainty.
+    if timeout 4 bash -c "exec 3<>/dev/tcp/$ip/$port" 2>/dev/null; then
+      printf 'INDETERMINATE'
+    else
+      printf 'DOWN'
+    fi
+  fi
+}
+
+cmd_status() {
+  load_inventory
+  local arg="${1:-all}"
+  printf '%sReachability check (SSH banner on port %s)%s\n' "$C_BOLD" "$SSH_PORT" "$C_RESET"
+  printf '%sA host is only UP if it answers with a real SSH banner.%s\n\n' "$C_DIM" "$C_RESET"
+  local t
+  while read -r t; do
+    local i; i="$(find_host "$t")" || { warn "unknown host: $t"; continue; }
+    local ip="${F_IP[$i]}"
+    if [ "$ip" = "UNKNOWN" ]; then
+      printf '  %-13s %-17s %sunknown IP — add it to fleet/inventory.conf%s\n' "${F_ID[$i]}" "$ip" "$C_YELLOW" "$C_RESET"
+      continue
+    fi
+    local result; result="$(probe_ssh "$ip" "$SSH_PORT")"
+    case "$result" in
+      UP\|*)   printf '  %-13s %-17s %sUP%s   %s\n' "${F_ID[$i]}" "$ip" "$C_GREEN" "$C_RESET" "${result#UP|}" ;;
+      DOWN)    printf '  %-13s %-17s %sDOWN%s (connection refused or filtered)\n' "${F_ID[$i]}" "$ip" "$C_RED" "$C_RESET" ;;
+      *)       printf '  %-13s %-17s %sINDETERMINATE%s — this network cannot verify it\n' "${F_ID[$i]}" "$ip" "$C_YELLOW" "$C_RESET" ;;
+    esac
+  done < <(targets_for "$arg")
+  printf '\n%sIf everything reads INDETERMINATE, you are behind an egress proxy that accepts\n' "$C_DIM"
+  printf 'every connection. Run this from Cloud Shell or your own PC instead.%s\n\n' "$C_RESET"
+}
+
+cmd_audit() {
+  load_inventory
+  [ -f "$AUDIT" ] || die "audit script missing: $AUDIT"
+  mkdir -p "$REPORTS"
+  local arg="${1:-}"
+  [ -z "$arg" ] && { warn "usage: grid-os audit <id>|all"; cmd_hosts >&2; return 1; }
+
+  local t
+  while read -r t; do
+    local i; i="$(find_host "$t")" || { warn "unknown host: $t"; continue; }
+    local ip="${F_IP[$i]}" user="${F_USER[$i]}" key="${F_KEY[$i]}" id="${F_ID[$i]}"
+    key="${key/#\~/$HOME}"
+    if [ "$ip" = "UNKNOWN" ] || [ "$user" = "UNKNOWN" ]; then
+      warn "$id: no IP or user on record — skipping"
+      continue
+    fi
+    if [ ! -f "$key" ]; then
+      warn "$id: key not found at $key — cannot audit non-interactively"
+      info "    If this host uses a password or the provider's browser terminal,"
+      info "    run the audit there instead (see docs/terminus-and-ssh-access.md)."
+      continue
+    fi
+    printf '%sAuditing %s (%s@%s)%s\n' "$C_BOLD" "$id" "$user" "$ip" "$C_RESET"
+    if ! scp -q -P "$SSH_PORT" -i "$key" -o StrictHostKeyChecking=accept-new \
+         "$AUDIT" "$user@$ip:vps-healthcheck-readonly.sh" 2>/dev/null; then
+      warn "  could not copy the audit script to $id"
+      continue
+    fi
+    ssh -p "$SSH_PORT" -i "$key" -o StrictHostKeyChecking=accept-new "$user@$ip" \
+      "chmod 700 ~/vps-healthcheck-readonly.sh && AUDIT_LABEL=$id ~/vps-healthcheck-readonly.sh" 2>/dev/null \
+      | sed 's/^/  /'
+    scp -q -P "$SSH_PORT" -i "$key" -o StrictHostKeyChecking=accept-new \
+      "$user@$ip:vps-audit-${id}-*.txt" "$REPORTS/" 2>/dev/null \
+      && info "  report pulled to $REPORTS/" \
+      || warn "  audit ran but the report could not be pulled back"
+    printf '\n'
+  done < <(targets_for "$arg")
+}
+
+cmd_connect() {
+  load_inventory
+  local id="${1:-}"
+  [ -z "$id" ] && { warn "usage: grid-os connect <id>"; cmd_hosts >&2; return 1; }
+  local i; i="$(find_host "$id")" || die "unknown host: $id"
+  local ip="${F_IP[$i]}" user="${F_USER[$i]}" key="${F_KEY[$i]}"
+  key="${key/#\~/$HOME}"
+  [ "$ip" = "UNKNOWN" ] && die "$id has no IP on record"
+  [ -f "$key" ] || die "key not found: $key"
+  info "connecting to ${F_LABEL[$i]} (${ip})…"
+  exec ssh -p "$SSH_PORT" -i "$key" -o StrictHostKeyChecking=accept-new "$user@$ip"
+}
+
+cmd_sshconfig() {
+  load_inventory
+  printf '%s# Generated by grid-os sshconfig — review before installing.%s\n' "$C_DIM" "$C_RESET"
+  printf '# Install:  grid-os sshconfig >> ~/.ssh/config   (check for duplicates first)\n'
+  printf '# Terminus: create one host per block below, or import ~/.ssh/config.\n\n'
+  local i
+  for i in "${!F_ID[@]}"; do
+    local ip="${F_IP[$i]}" user="${F_USER[$i]}" key="${F_KEY[$i]}" id="${F_ID[$i]}"
+    if [ "$ip" = "UNKNOWN" ] || [ "$user" = "UNKNOWN" ]; then
+      printf '# SKIPPED %-12s (incomplete record — fill in fleet/inventory.conf)\n' "$id"
+      continue
+    fi
+    printf 'Host %s\n' "$id"
+    printf '    HostName %s\n' "$ip"
+    printf '    User %s\n' "$user"
+    printf '    IdentityFile %s\n' "$key"
+    printf '    IdentitiesOnly yes\n'
+    printf '    Port %s\n' "$SSH_PORT"
+    printf '    ServerAliveInterval 60\n'
+    printf '    ServerAliveCountMax 3\n\n'
+  done
+}
+
+cmd_note() {
+  local text="${*:-}"
+  [ -z "$text" ] && { warn 'usage: grid-os note "text"'; return 1; }
+  mkdir -p "$(dirname "$NOTES")"
+  [ -f "$NOTES" ] || printf '# Learning notes\n\nRunning log. Newest at the bottom.\n' > "$NOTES"
+  printf '\n## %s\n\n%s\n' "$(date '+%Y-%m-%d %H:%M')" "$text" >> "$NOTES"
+  printf '%snoted%s → %s\n' "$C_GREEN" "$C_RESET" "$NOTES"
+}
+
+cmd_sot() {
+  printf 'Inventory (machine): %s\n' "$INV"
+  printf 'Inventory (human):   %s\n' "$ROOT/docs/SOT-fleet-inventory.md"
+  printf 'Runbook:             %s\n' "$ROOT/docs/vps-fleet-runbook.md"
+  printf 'Credentials map:     %s\n' "$ROOT/docs/vault-credentials.md"
+  printf 'Learning notes:      %s\n' "$NOTES"
+}
+
+usage() {
+  cat <<EOF
+${C_BOLD}GRiD-OS fleet CLI${C_RESET}
+
+  ${C_BLUE}grid-os hosts${C_RESET}                 inventory table
+  ${C_BLUE}grid-os status${C_RESET} [all|<id>]     TCP reachability on port ${SSH_PORT}
+  ${C_BLUE}grid-os audit${C_RESET}  <id>|all       run the read-only audit, pull the report back
+  ${C_BLUE}grid-os connect${C_RESET} <id>          ssh in with the recorded key
+  ${C_BLUE}grid-os sshconfig${C_RESET}             emit an ~/.ssh/config block (Terminus/CLI)
+  ${C_BLUE}grid-os note${C_RESET} "<text>"         append a timestamped note to learning-notes.md
+  ${C_BLUE}grid-os sot${C_RESET}                   paths of the source-of-truth documents
+
+  Inventory: $INV
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"; [ $# -gt 0 ] && shift || true
+  case "$cmd" in
+    hosts|list|ls)   cmd_hosts "$@" ;;
+    status|ping)     cmd_status "${1:-all}" ;;
+    audit|check)     cmd_audit "${1:-}" ;;
+    connect|ssh|c)   cmd_connect "${1:-}" ;;
+    sshconfig|cfg)   cmd_sshconfig "$@" ;;
+    note|log)        cmd_note "$@" ;;
+    sot|paths)       cmd_sot ;;
+    help|-h|--help)  usage ;;
+    *)               warn "unknown command: $cmd"; echo; usage; exit 1 ;;
+  esac
+}
+
+main "$@"
