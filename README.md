@@ -1,4 +1,4 @@
-# Sovereign — private-LLM product reference implementation
+# GRiD-OS-SOVEREIGN — private-LLM product reference implementation
 
 A dark, chat-first, local-first interface for running open-weight language models inside
 infrastructure you control. Built to the Venice-adjacent "sovereign AI" register: quiet surfaces, one

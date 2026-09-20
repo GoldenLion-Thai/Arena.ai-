@@ -13,7 +13,7 @@
 (function () {
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
-  const MD = window.SOV_MD;
+  const MD = window.GRID_MD;
 
   const TABS = [
     { id: "safe", label: "Safe work", note: "140 prompts · clearly permitted internal requests" },

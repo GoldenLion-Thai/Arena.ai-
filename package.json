@@ -1,8 +1,8 @@
 {
-  "name": "sovereign-private-ai",
+  "name": "grid-os-sovereign",
   "version": "1.0.0",
   "private": true,
-  "description": "Sovereign \u2014 reference implementation of a privacy-first, local-first, chat-first private LLM interface.",
+  "description": "GRiD-OS-SOVEREIGN \u2014 reference implementation of a privacy-first, local-first, chat-first private LLM interface with real Ollama/vLLM gateway wiring.",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",

@@ -1,5 +1,5 @@
 /* ============================================================================
-   tests/smoke.mjs — runtime smoke tests for the Sovereign reference UI.
+   tests/smoke.mjs — runtime smoke tests for the GRiD-OS-SOVEREIGN reference UI.
 
    Dev-only (jsdom + fake-indexeddb). The shipped product has zero runtime
    dependencies and no build step; these tests exist to prove the interactive
@@ -135,9 +135,9 @@ async function testBrand() {
   // default brand
   const base = loadPage("index.html");
   await wait(200);
-  ok("wordmark is injected from brand.js", base.doc.querySelector(".brand [data-brand='name']").textContent === base.w.SOV_BRAND.NAME);
-  ok("document title derives from the brand", base.doc.title === `${base.w.SOV_BRAND.NAME} — ${base.w.SOV_BRAND.TAGLINE}`, base.doc.title);
-  ok("meta description is brand-managed", base.doc.querySelector('meta[name="description"]').content === base.w.SOV_BRAND.DESCRIPTION);
+  ok("wordmark is injected from brand.js", base.doc.querySelector(".brand [data-brand='name']").textContent === base.w.GRID_BRAND.NAME);
+  ok("document title derives from the brand", base.doc.title === `${base.w.GRID_BRAND.NAME} — ${base.w.GRID_BRAND.TAGLINE}`, base.doc.title);
+  ok("meta description is brand-managed", base.doc.querySelector('meta[name="description"]').content === base.w.GRID_BRAND.DESCRIPTION);
   ok("logo mark is an injected SVG", base.doc.querySelectorAll(".brand__mark svg").length >= 2);
   ok("favicon generated from the brand", /^data:image\/svg\+xml,/.test(base.doc.querySelector('link[rel="icon"]').href));
   ok("footer legal name and year injected", /Private AI/.test(base.doc.querySelector("[data-brand='legal']").textContent) && base.doc.querySelector("[data-brand='year']").textContent === String(new Date().getFullYear()));
@@ -148,26 +148,32 @@ async function testBrand() {
   const renamed = loadPage("index.html", {
     patch: {
       "assets/js/brand.js": (code) => {
-        const out = code.replace('const NAME = "Sovereign";', 'const NAME = "QuietCompute";');
+        const out = code.replace('const NAME = "GRiD-OS-SOVEREIGN";', 'const NAME = "QuietCompute";');
         if (out === code) throw new Error("brand.js NAME constant not found — rename point moved");
         return out;
       },
     },
   });
-  await wait(200);
+  await wait(1600); // let the hero terminal type its first CLI line
   const d = renamed.doc;
+  const B = renamed.w.GRID_BRAND;
   ok("one constant renames the wordmark", [...d.querySelectorAll("[data-brand='name']")].every((e) => e.textContent === "QuietCompute"));
   ok("one constant renames the title", d.title.startsWith("QuietCompute — "), d.title);
-  ok("no stale brand text left in the rendered page", !/Sovereign/i.test(d.body.textContent.replace(/sovereign.css|sovereign-/gi, "")), (d.body.textContent.match(/\w*Sovereign\w*/gi) || []).slice(0, 3).join(","));
+  ok("legal name derives from the constant", B.LEGAL_NAME === "QuietCompute Private AI", B.LEGAL_NAME);
+  ok("compact wordmark derives from the constant", d.querySelector(".brand__compact").textContent === B.COMPACT && B.COMPACT.length > 0, B.COMPACT);
+  ok("slug and CLI name derive from the constant", B.SLUG === "quietcompute" && B.CLI === "quietcompute", `${B.SLUG}/${B.CLI}`);
+  ok("hero terminal types the derived CLI name", /quietcompute status/.test(d.getElementById("term").textContent), d.getElementById("term").textContent.slice(0, 40));
+  const stale = d.body.textContent.match(/GRiD-OS[-\s]?SOVEREIGN|grid-os-sovereign/gi) || [];
+  ok("no stale brand text left in the rendered page", stale.length === 0, stale.slice(0, 3).join(","));
   ok("app page renames too", (() => {
     const app = loadPage("app.html", {
-      patch: { "assets/js/brand.js": (c) => c.replace('const NAME = "Sovereign";', 'const NAME = "QuietCompute";') },
+      patch: { "assets/js/brand.js": (c) => c.replace('const NAME = "GRiD-OS-SOVEREIGN";', 'const NAME = "QuietCompute";') },
     });
     return app.doc.title === "QuietCompute — Private workspace";
   })(), "app title");
   ok("lab page renames too", (() => {
     const lab = loadPage("lab.html", {
-      patch: { "assets/js/brand.js": (c) => c.replace('const NAME = "Sovereign";', 'const NAME = "QuietCompute";') },
+      patch: { "assets/js/brand.js": (c) => c.replace('const NAME = "GRiD-OS-SOVEREIGN";', 'const NAME = "QuietCompute";') },
     });
     return lab.doc.title === "Behaviour Lab — QuietCompute";
   })(), "lab title");
@@ -192,7 +198,7 @@ async function testWorkspace() {
   click($("#modelChip"));
   await wait(80);
   const rows = $$("#modelList .mrow");
-  ok("model picker lists the full registry", rows.length === w.SOV_MODELS.length, `${rows.length}`);
+  ok("model picker lists the full registry", rows.length === w.GRID_MODELS.length, `${rows.length}`);
   ok("picker groups recommended / specialist / advanced", $$("#modelList .picker__group").length === 3);
   ok("every row states a data location", rows.every((r) => r.querySelector(".mrow__loc").textContent.trim().length > 0));
   ok("research profile is visibly tagged", /research/i.test($("#modelList").textContent) && $$("#modelList .tag--research").length >= 1);
@@ -264,10 +270,10 @@ async function testWorkspace() {
   ok("TTFT reported per message", /TTFT \d+ ms/.test(metrics), metrics);
   ok("throughput reported per message", /tok\/s/.test(metrics), metrics);
   ok("transport labelled local runtime", /local runtime/.test(metrics), metrics);
-  ok("conversation persisted locally", (await w.SOV_DB.listConversations()).length === 1);
-  const stored = await w.SOV_DB.listMessages((await w.SOV_DB.listConversations())[0].id);
+  ok("conversation persisted locally", (await w.GRID_DB.listConversations()).length === 1);
+  const stored = await w.GRID_DB.listMessages((await w.GRID_DB.listConversations())[0].id);
   ok("both messages persisted", stored.length === 2, `${stored.length}`);
-  ok("conversation titled from the prompt", /indemnity/i.test((await w.SOV_DB.listConversations())[0].title));
+  ok("conversation titled from the prompt", /indemnity/i.test((await w.GRID_DB.listConversations())[0].title));
   ok("sidebar lists the conversation", $$("#convList .conv").length === 1);
   ok("latency histogram populated", /ms/.test($("#statP50").textContent), $("#statP50").textContent);
 
@@ -289,19 +295,19 @@ async function testWorkspace() {
   ok("stopped state is labelled", /stopped/.test(stopped.querySelector(".msg__metrics").textContent), stopped.querySelector(".msg__metrics").textContent);
 
   /* ---- encryption round-trip ---- */
-  await w.SOV_VAULT.init("correct-horse-battery-staple");
-  ok("vault reports unlocked after init", w.SOV_VAULT.unlocked);
-  const secret = await w.SOV_DB.addMessage({ convId: "vault-test", role: "user", content: "PAYROLL: 412000 GBP", meta: {} });
+  await w.GRID_VAULT.init("correct-horse-battery-staple");
+  ok("vault reports unlocked after init", w.GRID_VAULT.unlocked);
+  const secret = await w.GRID_DB.addMessage({ convId: "vault-test", role: "user", content: "PAYROLL: 412000 GBP", meta: {} });
   ok("ciphertext does not contain the plaintext", !JSON.stringify(secret.body).includes("PAYROLL"));
   ok("cipher version marked as encrypted", secret.body.v === 1 && Boolean(secret.body.iv));
-  ok("decrypt round-trips", (await w.SOV_DB.readMessage(secret)) === "PAYROLL: 412000 GBP");
-  w.SOV_VAULT.lock();
-  ok("locked vault cannot read bodies", /encrypted/i.test(await w.SOV_DB.readMessage(secret)));
-  await w.SOV_VAULT.unlock("correct-horse-battery-staple");
-  ok("correct passphrase re-unlocks", (await w.SOV_DB.readMessage(secret)) === "PAYROLL: 412000 GBP");
+  ok("decrypt round-trips", (await w.GRID_DB.readMessage(secret)) === "PAYROLL: 412000 GBP");
+  w.GRID_VAULT.lock();
+  ok("locked vault cannot read bodies", /encrypted/i.test(await w.GRID_DB.readMessage(secret)));
+  await w.GRID_VAULT.unlock("correct-horse-battery-staple");
+  ok("correct passphrase re-unlocks", (await w.GRID_DB.readMessage(secret)) === "PAYROLL: 412000 GBP");
   let rejected = false;
   try {
-    await w.SOV_VAULT.unlock("wrong-passphrase-entirely");
+    await w.GRID_VAULT.unlock("wrong-passphrase-entirely");
   } catch (e) {
     rejected = e.message === "BAD_PASSPHRASE";
   }
@@ -325,7 +331,7 @@ async function testWorkspace() {
   /* ---- retention is enforced, not decorative ---- */
   click(doc.querySelector("#dialog [data-ok]")); // close the stats dialog
   await wait(60);
-  const convsOnDisk = (await w.SOV_DB.listConversations()).length;
+  const convsOnDisk = (await w.GRID_DB.listConversations()).length;
   ok("one conversation is on disk before the switch", convsOnDisk === 1, `${convsOnDisk}`);
 
   click($("#newChat"));
@@ -333,7 +339,7 @@ async function testWorkspace() {
   $("#retention").value = "0";
   $("#retention").dispatchEvent(new w.Event("change", { bubbles: true }));
   await wait(250);
-  ok("retention 0 switches writes to memory-only", w.SOV_APP.persistOn() === false);
+  ok("retention 0 switches writes to memory-only", w.GRID_APP.persistOn() === false);
   ok("sidebar labels storage as session-only", /session only/i.test($("#statSize").textContent), $("#statSize").textContent);
   ok("existing history is still readable at retention 0", $$("#convList .conv").length === 1, `${$$("#convList .conv").length}`);
 
@@ -343,19 +349,19 @@ async function testWorkspace() {
   ok("memory-only generation completes", await settle(doc));
 
   ok("transcript renders in the thread", $$("#threadInner .msg").length === 2, `${$$("#threadInner .msg").length}`);
-  ok("nothing new written to disk", (await w.SOV_DB.listConversations()).length === convsOnDisk, `${convsOnDisk} → ${(await w.SOV_DB.listConversations()).length}`);
-  ok("session-only conversation held in memory and flagged", w.SOV_APP.mem.convs.length === 1 && w.SOV_APP.mem.convs[0].sessionOnly === true);
+  ok("nothing new written to disk", (await w.GRID_DB.listConversations()).length === convsOnDisk, `${convsOnDisk} → ${(await w.GRID_DB.listConversations()).length}`);
+  ok("session-only conversation held in memory and flagged", w.GRID_APP.mem.convs.length === 1 && w.GRID_APP.mem.convs[0].sessionOnly === true);
   ok("session-only conversation appears in the sidebar", $$("#convList .conv").length === 2, `${$$("#convList .conv").length}`);
   ok("sidebar marks it as RAM-only", /RAM/.test($("#convList").textContent));
-  const memMsgs = Object.values(w.SOV_APP.mem.msgs).flat();
+  const memMsgs = Object.values(w.GRID_APP.mem.msgs).flat();
   ok("both messages live in RAM, not on disk", memMsgs.length === 2 && /GDPR/.test(memMsgs[0].content));
-  ok("memory messages never reached IndexedDB", (await w.SOV_DB.listMessages(w.SOV_APP.mem.convs[0].id)).length === 0);
+  ok("memory messages never reached IndexedDB", (await w.GRID_DB.listMessages(w.GRID_APP.mem.convs[0].id)).length === 0);
 
   // switching back to a window restores persistence
   $("#retention").value = "30";
   $("#retention").dispatchEvent(new w.Event("change", { bubbles: true }));
   await wait(250);
-  ok("retention restored", w.SOV_APP.persistOn() === true && /KB/.test($("#statSize").textContent));
+  ok("retention restored", w.GRID_APP.persistOn() === true && /KB/.test($("#statSize").textContent));
 
   ok("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 }
@@ -420,7 +426,7 @@ async function testLab() {
 /* ========================================================================== */
 
 (async function main() {
-  console.log("Sovereign smoke tests — jsdom + fake-indexeddb");
+  console.log("GRiD-OS-SOVEREIGN smoke tests — jsdom + fake-indexeddb");
   const started = Date.now();
   try {
     await testBrand();

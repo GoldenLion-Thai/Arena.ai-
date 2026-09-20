@@ -516,6 +516,31 @@ samp {
   box-shadow: none;
 }
 
+/* The full wordmark is long by design; small screens get the compact form. */
+.brand__compact {
+  display: none;
+}
+
+.brand span[data-brand] {
+  white-space: nowrap;
+}
+
+.chip__sub {
+  display: block;
+  font-size: 10.5px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 26ch;
+}
+
+.pstate__sub {
+  display: block;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .nav {
   display: flex;
   gap: 4px;
@@ -2167,6 +2192,11 @@ td.mono-cell {
   .chat__head > .mono {
     display: none;
   }
+  /* keep the privacy state readable; drop the secondary subtexts first */
+  .chip__sub,
+  #vaultState .dim {
+    display: none;
+  }
   .topbar .tag[title="Deployment target"] {
     display: none;
   }
@@ -2189,6 +2219,15 @@ td.mono-cell {
 }
 
 @media (max-width: 900px) {
+  .brand__full {
+    display: none;
+  }
+  .brand__compact {
+    display: inline;
+  }
+  .pstate__sub {
+    display: none;
+  }
   .hero__grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 34px;

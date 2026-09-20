@@ -5,7 +5,7 @@
    `policy` and resource facts rather than marketing adjectives.
    ========================================================================== */
 
-window.SOV_MODELS = [
+window.GRID_MODELS = [
   {
     id: "qwen-14b",
     group: "Recommended",
@@ -176,10 +176,10 @@ window.SOV_MODELS = [
   },
 ];
 
-window.SOV_MODEL_BY_ID = Object.fromEntries(window.SOV_MODELS.map((m) => [m.id, m]));
+window.GRID_MODEL_BY_ID = Object.fromEntries(window.GRID_MODELS.map((m) => [m.id, m]));
 
 /* Privacy / deployment modes shown by the privacy-state component. */
-window.SOV_MODES = [
+window.GRID_MODES = [
   {
     id: "local",
     label: "Local only",
@@ -221,4 +221,4 @@ window.SOV_MODES = [
   },
 ];
 
-window.SOV_MODE_BY_ID = Object.fromEntries(window.SOV_MODES.map((m) => [m.id, m]));
+window.GRID_MODE_BY_ID = Object.fromEntries(window.GRID_MODES.map((m) => [m.id, m]));

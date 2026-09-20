@@ -170,12 +170,12 @@ try {
   const $ = (s) => doc.querySelector(s);
   const $$ = (s) => [...doc.querySelectorAll(s)];
 
-  ok("starts on the demo responder", w.SOV_GATEWAY.describe().state === "demo");
+  ok("starts on the demo responder", w.GRID_GATEWAY.describe().state === "demo");
   ok("top bar says DEMO before configuration", $("#gwChipLabel").textContent === "DEMO");
 
   click($("#settingsBtn"));
   await wait(120);
-  ok("connection presets are offered", $$("#gwPreset option").length === w.SOV_GATEWAY.PRESETS.length);
+  ok("connection presets are offered", $$("#gwPreset option").length === w.GRID_GATEWAY.PRESETS.length);
 
   setSelect(w, $("#gwPreset"), "proxy");
   await wait(80);
@@ -186,11 +186,11 @@ try {
   setSelect(w, $("#gwRoute"), "all");
   await wait(40);
   click($("#gwSave"));
-  for (let i = 0; i < 80 && w.SOV_GATEWAY.health !== "ok"; i++) await wait(100);
+  for (let i = 0; i < 80 && w.GRID_GATEWAY.health !== "ok"; i++) await wait(100);
   await wait(150);
 
-  ok("probe reaches the endpoint through the proxy", w.SOV_GATEWAY.health === "ok", JSON.stringify(w.SOV_GATEWAY.lastProbe));
-  ok("probe reports latency", w.SOV_GATEWAY.lastProbe.ms >= 0 && w.SOV_GATEWAY.lastProbe.ms < 5000);
+  ok("probe reaches the endpoint through the proxy", w.GRID_GATEWAY.health === "ok", JSON.stringify(w.GRID_GATEWAY.lastProbe));
+  ok("probe reports latency", w.GRID_GATEWAY.lastProbe.ms >= 0 && w.GRID_GATEWAY.lastProbe.ms < 5000);
   ok("discovered models are listed", $$("#gwModels [data-use]").length === 2, `${$$("#gwModels [data-use]").length}`);
   ok("discovered models carry size and quantisation", /14B/.test($("#gwModels").textContent) && /Q4_K_M/.test($("#gwModels").textContent));
   ok("status tag flips to connected", /connected/i.test($("#gwStatusTag").textContent), $("#gwStatusTag").textContent);
@@ -205,7 +205,7 @@ try {
   ok("endpoint model shows its runtime location", /same-origin proxy/i.test(endpointRow.textContent), endpointRow.textContent.slice(0, 120));
   click(endpointRow);
   await wait(200);
-  ok("selecting an endpoint model activates it", w.SOV_APP.state.model.fromEndpoint === true && /coder7b/.test($("#modelChipName").textContent), $("#modelChipName").textContent);
+  ok("selecting an endpoint model activates it", w.GRID_APP.state.model.fromEndpoint === true && /coder7b/.test($("#modelChipName").textContent), $("#modelChipName").textContent);
 
   console.log("\nworkspace — real inference through the gateway");
   const ta = $("#composer");
@@ -226,8 +226,8 @@ try {
   ok("throughput computed from eval_duration", /3[01] tok\/s/.test(metrics), metrics);
   ok("TTFT measured from request start, not from first byte", /TTFT [1-9]\d* ms/.test(metrics), metrics);
 
-  const stored = await w.SOV_DB.listConversations();
-  const msgs = await w.SOV_DB.listMessages(stored[0].id);
+  const stored = await w.GRID_DB.listConversations();
+  const msgs = await w.GRID_DB.listMessages(stored[0].id);
   const savedMeta = msgs.at(-1).meta;
   ok("gateway metadata persisted with the message", savedMeta.transport === "gateway:ollama" && savedMeta.runtime.evalCount === 37, JSON.stringify(savedMeta.runtime));
 
@@ -239,10 +239,10 @@ try {
   $("#gwUrl").value = mock.baseUrl; // absolute, vLLM-style
   $("#gwModel").value = "qwen2.5:14b-instruct-q4_K_M";
   click($("#gwSave"));
-  for (let i = 0; i < 80 && w.SOV_GATEWAY.lastProbe?.at === undefined; i++) await wait(50);
+  for (let i = 0; i < 80 && w.GRID_GATEWAY.lastProbe?.at === undefined; i++) await wait(50);
   await wait(600);
-  ok("OpenAI-compatible probe succeeds", w.SOV_GATEWAY.health === "ok", JSON.stringify(w.SOV_GATEWAY.lastProbe));
-  ok("probe used /v1/models", w.SOV_GATEWAY.modelsUrl().endsWith("/v1/models"), w.SOV_GATEWAY.modelsUrl());
+  ok("OpenAI-compatible probe succeeds", w.GRID_GATEWAY.health === "ok", JSON.stringify(w.GRID_GATEWAY.lastProbe));
+  ok("probe used /v1/models", w.GRID_GATEWAY.modelsUrl().endsWith("/v1/models"), w.GRID_GATEWAY.modelsUrl());
 
   click($("#modelChip"));
   await wait(100);
@@ -261,10 +261,10 @@ try {
   console.log("\nworkspace — failure paths");
   $("#gwUrl").value = "http://127.0.0.1:1";
   click($("#gwSave"));
-  for (let i = 0; i < 60 && w.SOV_GATEWAY.health !== "error"; i++) await wait(100);
+  for (let i = 0; i < 60 && w.GRID_GATEWAY.health !== "error"; i++) await wait(100);
   await wait(100);
-  ok("dead endpoint reported as unreachable", w.SOV_GATEWAY.health === "error", w.SOV_GATEWAY.lastProbe?.error);
-  ok("error explains the proxy/CORS fix", /proxy|OLLAMA_ORIGINS|reachable/i.test(w.SOV_GATEWAY.lastProbe.error), w.SOV_GATEWAY.lastProbe.error);
+  ok("dead endpoint reported as unreachable", w.GRID_GATEWAY.health === "error", w.GRID_GATEWAY.lastProbe?.error);
+  ok("error explains the proxy/CORS fix", /proxy|OLLAMA_ORIGINS|reachable/i.test(w.GRID_GATEWAY.lastProbe.error), w.GRID_GATEWAY.lastProbe.error);
   ok("top bar reflects the outage", $("#gwChipLabel").textContent === "GATEWAY DOWN", $("#gwChipLabel").textContent);
 
   // with the gateway down and route=all, the UI must say so rather than hang
@@ -281,7 +281,7 @@ try {
   await wait(100);
   click($("#gwSave"));
   await wait(200);
-  ok("demo responder restored", w.SOV_GATEWAY.describe().state === "demo" && $("#gwChipLabel").textContent === "DEMO");
+  ok("demo responder restored", w.GRID_GATEWAY.describe().state === "demo" && $("#gwChipLabel").textContent === "DEMO");
   ta.value = "Sketch the hosting stack";
   ta.dispatchEvent(new w.Event("input", { bubbles: true }));
   ta.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));

@@ -1,5 +1,5 @@
 /* ============================================================================
-   app.js — Sovereign workspace controller.
+   app.js — GRiD-OS-SOVEREIGN workspace controller.
 
    Design rules enforced in code, not just in copy:
    • the user message renders locally and instantly, before any network work
@@ -11,15 +11,15 @@
    ========================================================================== */
 
 (function () {
-  const DB = window.SOV_DB;
-  const Vault = window.SOV_VAULT;
-  const Engine = window.SOV_ENGINE;
-  const MD = window.SOV_MD;
-  const MODELS = window.SOV_MODELS;
-  const MODEL_BY_ID = window.SOV_MODEL_BY_ID;
-  const MODES = window.SOV_MODES;
-  const MODE_BY_ID = window.SOV_MODE_BY_ID;
-  const Gateway = window.SOV_GATEWAY;
+  const DB = window.GRID_DB;
+  const Vault = window.GRID_VAULT;
+  const Engine = window.GRID_ENGINE;
+  const MD = window.GRID_MD;
+  const MODELS = window.GRID_MODELS;
+  const MODEL_BY_ID = window.GRID_MODEL_BY_ID;
+  const MODES = window.GRID_MODES;
+  const MODE_BY_ID = window.GRID_MODE_BY_ID;
+  const Gateway = window.GRID_GATEWAY;
 
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -27,7 +27,7 @@
   const LS = {
     get(k, d) {
       try {
-        const v = localStorage.getItem("sov:" + k);
+        const v = localStorage.getItem("grid:" + k);
         return v == null ? d : JSON.parse(v);
       } catch {
         return d;
@@ -35,7 +35,7 @@
     },
     set(k, v) {
       try {
-        localStorage.setItem("sov:" + k, JSON.stringify(v));
+        localStorage.setItem("grid:" + k, JSON.stringify(v));
       } catch {}
     },
   };
@@ -1254,7 +1254,7 @@
       b.addEventListener("click", () => {
         const id = b.dataset.use;
         Gateway.save({ model: id });
-        const published = window.SOV_MODEL_BY_ID["endpoint:" + id];
+        const published = window.GRID_MODEL_BY_ID["endpoint:" + id];
         if (published) {
           state.model = published;
           persist();
@@ -1631,7 +1631,7 @@
       });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = ((window.SOV_BRAND && window.SOV_BRAND.SLUG) || "workspace") + "-export.json";
+      a.download = ((window.GRID_BRAND && window.GRID_BRAND.SLUG) || "workspace") + "-export.json";
       a.click();
       toast("Full workspace exported");
     });
@@ -1682,5 +1682,5 @@
     boot();
   });
 
-  window.SOV_APP = { state, toast, openSheet, Store, persistOn, mem, saveGateway, probeGateway };
+  window.GRID_APP = { state, toast, openSheet, Store, persistOn, mem, saveGateway, probeGateway };
 })();

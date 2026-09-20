@@ -15,7 +15,7 @@
    ========================================================================== */
 
 (function () {
-  const DB_NAME = "sov-vault";
+  const DB_NAME = "grid-vault";
   const META_STORE = "meta";
   const PBKDF2_ITERATIONS = 210000;
   const enc = new TextEncoder();
@@ -120,7 +120,7 @@
       const key = await deriveKey(passphrase, salt);
       // Verification token proves the passphrase later without storing it.
       const iv = crypto.getRandomValues(new Uint8Array(12));
-      const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode("sov-vault-ok"));
+      const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode("grid-vault-ok"));
       await metaSet("kdf", {
         algo: "PBKDF2-SHA256",
         iterations: PBKDF2_ITERATIONS,
@@ -174,5 +174,5 @@
     },
   };
 
-  window.SOV_VAULT = Vault;
+  window.GRID_VAULT = Vault;
 })();

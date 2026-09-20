@@ -120,5 +120,5 @@
       .map((c) => c.trim());
   }
 
-  window.SOV_MD = { render, escape };
+  window.GRID_MD = { render, escape };
 })();

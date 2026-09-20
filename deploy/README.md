@@ -77,7 +77,7 @@ registry for pulls and nothing else.
 ### Option A — node (fastest, includes the proxy)
 
 ```bash
-git clone <your-fork> sovereign && cd sovereign
+git clone <your-fork> grid-os-sovereign && cd grid-os-sovereign
 cp deploy/.env.example .env      # edit OLLAMA_URL
 OLLAMA_URL=http://127.0.0.1:11434 PORT=8080 node server.js
 ```

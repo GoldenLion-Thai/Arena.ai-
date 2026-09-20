@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Sovereign — Private workspace</title>
+    <title>GRiD-OS-SOVEREIGN — Private workspace</title>
     <meta
       name="description"
       content="Chat-first private AI workspace. Local-first encrypted history, inspectable data boundary, model picker with data-handling metadata."
@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="assets/css/sovereign.css" />
+    <link rel="stylesheet" href="assets/css/grid-os.css" />
     <script src="assets/js/brand.js"></script>
     <link
       rel="icon"
@@ -32,7 +32,7 @@
           </button>
 
           <a class="brand" href="index.html" title="Back to overview" data-brand-aria="{name} — overview">
-            <span class="brand__mark" data-brand-mark></span> <span data-brand="name">Sovereign</span>
+            <span class="brand__mark" data-brand-mark></span> <span data-brand="name" class="brand__full">GRiD-OS-SOVEREIGN</span><span data-brand="compact" class="brand__compact">GRiD-OS</span>
           </a>
 
           <span class="mono" style="color:var(--border-strong)">/</span>
@@ -50,7 +50,7 @@
             <span class="dot dot--cloud" id="gwDot"></span>
             <span style="min-width:0">
               <span class="mono" id="gwChipLabel">DEMO</span>
-              <span class="dim" id="gwChipSub" style="display:block;font-size:10.5px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No gateway configured · nothing leaves this device</span>
+              <span class="dim chip__sub" id="gwChipSub">No gateway configured · nothing leaves this device</span>
             </span>
           </button>
 
@@ -58,7 +58,7 @@
             <span class="dot dot--local"></span>
             <span>
               <span class="pstate__label" id="pstateLabel">Local only</span>
-              <span class="dim" id="pstateSub" style="display:block;font-size:11px;line-height:1.2">No cloud inference</span>
+              <span class="dim pstate__sub" id="pstateSub">No cloud inference</span>
             </span>
           </button>
 
@@ -368,7 +368,7 @@
       );
       (function () {
         const sel = document.getElementById("retention");
-        const raw = JSON.parse(localStorage.getItem("sov:settings") || "{}").retention;
+        const raw = JSON.parse(localStorage.getItem("grid:settings") || "{}").retention;
         const v = typeof raw === "number" ? String(raw) : "30";
         if ([...sel.options].some((o) => o.value === v)) sel.value = v;
       })();

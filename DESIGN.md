@@ -1,4 +1,4 @@
-# Sovereign — design guide for privacy-first, minimal AI interfaces
+# GRiD-OS-SOVEREIGN — design guide for privacy-first, minimal AI interfaces
 
 A working reference for building a private-LLM product interface in the Venice-adjacent
 "sovereign AI" register: dark, quiet, technically credible, slightly anti-corporate — without
@@ -8,7 +8,7 @@ This guide is implemented, not just described. Every rule below has a correspond
 
 | Concern | Implementation |
 | --- | --- |
-| Tokens, layout, motion | `assets/css/sovereign.css` |
+| Tokens, layout, motion | `assets/css/grid-os.css` |
 | Landing narrative + live theming | `index.html`, `assets/js/landing.js` |
 | Chat-first workspace | `app.html`, `assets/js/app.js` |
 | Model registry with data-handling metadata | `assets/js/models.js` |
@@ -172,7 +172,7 @@ Beside the workspace name, always visible, always clickable:
 
 Opening it shows a **generated** data-flow list for the *current* model and mode — four numbered
 steps describing where the prompt actually goes. It is generated from state
-(`models.js → SOV_MODES`, `app.js → renderPrivacy`) rather than being a static graphic, so it cannot
+(`models.js → GRID_MODES`, `app.js → renderPrivacy`) rather than being a static graphic, so it cannot
 drift from reality.
 
 Rules:
@@ -431,10 +431,10 @@ Encrypted object storage for approved documents
 
 ## 12. Naming
 
-Shortlist considered: **Sovereign**, VaultLLM, Blackbox Private AI, IntraMind, PrivateStack,
+Shortlist considered: **GRiD-OS-SOVEREIGN**, VaultLLM, Blackbox Private AI, IntraMind, PrivateStack,
 ClosedCircuit AI, QuietCompute, Northstar Private AI.
 
-`Sovereign` is used here because it signals control and jurisdiction — the two things a UK legal or
+`GRiD-OS-SOVEREIGN` is used here because it signals control and jurisdiction — the two things a UK legal or
 finance buyer is actually procuring — without implying the service is ungoverned. "Uncensored" as an
 identity attracts the wrong evaluation criteria and the wrong counsel.
 

@@ -110,7 +110,7 @@
     });
     renderSwatches(t.swatches);
     try {
-      localStorage.setItem("sov:theme", id);
+      localStorage.setItem("grid:theme", id);
     } catch {}
   }
 
@@ -130,7 +130,7 @@
 
   /* ------------------------------------------------------------ terminal */
 
-  const CLI = (window.SOV_BRAND && window.SOV_BRAND.SLUG) || "sovereign";
+  const CLI = (window.GRID_BRAND && window.GRID_BRAND.CLI) || "grid-os";
 
   const SCRIPT = [
     { t: "type", cls: "prompt", text: `$ ${CLI} status` },
@@ -226,7 +226,7 @@
     booted = true;
     let saved = "midnight";
     try {
-      saved = localStorage.getItem("sov:theme") || "midnight";
+      saved = localStorage.getItem("grid:theme") || "midnight";
     } catch {}
     applyTheme(saved);
 

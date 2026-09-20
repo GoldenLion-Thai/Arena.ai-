@@ -13,7 +13,7 @@
    ========================================================================== */
 
 (function () {
-  const DB_NAME = "sov-workspace";
+  const DB_NAME = "grid-workspace";
   const VERSION = 1;
   let dbp = null;
 
@@ -114,7 +114,7 @@
     /** Encrypts `content` before write. `meta` (tokens, latency, sources) stays
      *  plaintext so lists and metrics can render without unlocking. */
     async addMessage({ convId, role, content, meta }) {
-      const body = await window.SOV_VAULT.encrypt(content);
+      const body = await window.GRID_VAULT.encrypt(content);
       const rec = {
         id: uid(),
         convId,
@@ -131,7 +131,7 @@
 
     async readMessage(rec) {
       try {
-        return await window.SOV_VAULT.decrypt(rec.body);
+        return await window.GRID_VAULT.decrypt(rec.body);
       } catch (e) {
         return String(e && e.message === "LOCKED" ? "🔒 encrypted — unlock the vault to read" : "");
       }
@@ -140,7 +140,7 @@
     async updateMessage(id, content, meta) {
       const rec = await tx("messages", "readonly", (s) => promisify(s.get(id)));
       if (!rec) return null;
-      rec.body = await window.SOV_VAULT.encrypt(content);
+      rec.body = await window.GRID_VAULT.encrypt(content);
       if (meta) rec.meta = Object.assign({}, rec.meta, meta);
       await tx("messages", "readwrite", (s) => promisify(s.put(rec)));
       return rec;
@@ -187,5 +187,5 @@
     });
   }
 
-  window.SOV_DB = DB;
+  window.GRID_DB = DB;
 })();

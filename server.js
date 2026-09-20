@@ -144,7 +144,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Sovereign → http://${HOST}:${PORT}  (root ${ROOT})`);
+  console.log(`GRiD-OS-SOVEREIGN → http://${HOST}:${PORT}  (root ${ROOT})`);
   console.log(`Gateway   → ${PREFIX}* proxied to ${TARGET}`);
   console.log(`            set OLLAMA_URL to point at your Ollama/vLLM host`);
 });

@@ -136,5 +136,5 @@
     });
   }
 
-  window.SOV_ENGINE = { runLocal, sleep };
+  window.GRID_ENGINE = { runLocal, sleep };
 })();

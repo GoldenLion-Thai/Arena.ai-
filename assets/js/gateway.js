@@ -26,8 +26,8 @@
    ========================================================================== */
 
 (function () {
-  const LS_KEY = "sov:gateway";
-  const SS_KEY = "sov:gateway-key";
+  const LS_KEY = "grid:gateway";
+  const SS_KEY = "grid:gateway-key";
 
   const PRESETS = [
     {
@@ -226,7 +226,7 @@
   /** Discovered models are injected into the registry so the picker shows what
    *  is ACTUALLY available on your endpoint, not a marketing list. */
   function publishModels(list) {
-    const registry = window.SOV_MODELS;
+    const registry = window.GRID_MODELS;
     if (!registry) return [];
     // drop previously published endpoint models
     for (let i = registry.length - 1; i >= 0; i--) if (registry[i].fromEndpoint) registry.splice(i, 1);
@@ -255,7 +255,7 @@
       blurb: `Discovered on ${locationLabel()} by probing ${modelsUrl()}. Inference happens on that host; nothing is sent anywhere else.`,
     }));
     added.forEach((m) => registry.push(m));
-    window.SOV_MODEL_BY_ID = Object.fromEntries(registry.map((m) => [m.id, m]));
+    window.GRID_MODEL_BY_ID = Object.fromEntries(registry.map((m) => [m.id, m]));
     return added;
   }
 
@@ -504,7 +504,7 @@
     return { state: "unknown", label: "Gateway configured", detail: locationLabel() + " · not probed yet" };
   }
 
-  window.SOV_GATEWAY = {
+  window.GRID_GATEWAY = {
     PRESETS,
     get cfg() {
       return cfg;
