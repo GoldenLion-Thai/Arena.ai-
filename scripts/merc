@@ -396,6 +396,135 @@ todo_rm() {
   printf '%sremoved%s #%s\n' "$C_GREEN" "$C_RESET" "$id"
 }
 
+# ------------------------------------------------------------------ reboot
+# A reboot is the one routine action that can take the estate down if it goes
+# wrong, so it is gated, and it proves the host came back the same way it left.
+SNAPSHOT_CMD='hostname; echo "--- uname ---"; uname -a; echo "--- uptime ---"; uptime; echo "--- disk ---"; df -h /; echo "--- docker ---"; docker ps --format "{{.Names}}\t{{.Image}}\t{{.Status}}" 2>/dev/null || echo "(no docker)"; echo "--- listening ---"; ss -tuln 2>/dev/null | grep -i listen || true'
+
+ssh_run() {
+  ssh -p "$SSH_PORT" -i "$2" -o StrictHostKeyChecking=accept-new \
+      -o ConnectTimeout=10 -o BatchMode=yes "$1" "$3" 2>/dev/null
+}
+
+cmd_reboot() {
+  load_inventory
+  local id="${1:-}"
+  [ -z "$id" ] && { warn "usage: merc reboot <id>"; cmd_hosts >&2; return 1; }
+  local i; i="$(find_host "$id")" || die "unknown host: $id"
+  local ip="${F_IP[$i]}" user="${F_USER[$i]}" key="${F_KEY[$i]}" label="${F_LABEL[$i]}"
+  key="${key/#\~/$HOME}"
+  [ "$ip" = "UNKNOWN" ] && die "$id has no IP on record"
+  [ -f "$key" ] || die "key not found: $key"
+
+  printf '\n%sABOUT TO REBOOT%s  %s (%s@%s)\n\n' "$C_RED" "$C_RESET" "$label" "$user" "$ip"
+  printf 'This disconnects every session and restarts all containers.\n'
+  printf 'A snapshot is taken first so the after-state can be compared.\n\n'
+  if [ "${ASSUME_YES:-0}" != "1" ]; then
+    local confirm
+    read -r -p "Type the host id '$id' to proceed: " confirm
+    [ "$confirm" = "$id" ] || { printf '\nAborted. Nothing was changed.\n\n'; return 1; }
+  fi
+
+  local tmpdir; tmpdir="$(mktemp -d)"
+  printf '\n%sCapturing before-state...%s\n' "$C_BLUE" "$C_RESET"
+  if ! ssh_run "$user@$ip" "$key" "$SNAPSHOT_CMD" > "$tmpdir/before.txt"; then
+    rm -rf "$tmpdir"; die "could not reach $id - refusing to reboot a host I cannot verify"
+  fi
+  printf '  captured %s lines\n' "$(wc -l < "$tmpdir/before.txt")"
+
+  printf '\n%sSending reboot...%s\n' "$C_BLUE" "$C_RESET"
+  ssh_run "$user@$ip" "$key" 'sudo systemctl reboot' >/dev/null 2>&1 || true
+  printf '  waiting for it to go down\n'
+  sleep 20
+
+  printf '  waiting for it to come back'
+  local tries=0 max=40 up=0
+  while [ "$tries" -lt "$max" ]; do
+    sleep 5; tries=$((tries+1)); printf '.'
+    if ssh_run "$user@$ip" "$key" 'true' >/dev/null 2>&1; then up=1; break; fi
+  done
+  printf '\n'
+  if [ "$up" != "1" ]; then
+    printf '\n%s%s did not come back within %s seconds.%s\n' "$C_RED" "$label" "$((max*5))" "$C_RESET"
+    printf 'Check the provider console (Hostinger hPanel / OCI) before doing anything else.\n'
+    printf 'Before-state saved at: %s\n\n' "$tmpdir/before.txt"
+    return 1
+  fi
+  printf '\n%s%s is back up.%s\n' "$C_GREEN" "$label" "$C_RESET"
+
+  sleep 10
+  printf '\n%sCapturing after-state...%s\n' "$C_BLUE" "$C_RESET"
+  ssh_run "$user@$ip" "$key" "$SNAPSHOT_CMD" > "$tmpdir/after.txt"
+
+  printf '\n%s================ COMPARISON ================%s\n\n' "$C_BOLD" "$C_RESET"
+  if diff -u "$tmpdir/before.txt" "$tmpdir/after.txt" > "$tmpdir/diff.txt"; then
+    printf '%sIdentical - nothing changed unexpectedly.%s\n\n' "$C_GREEN" "$C_RESET"
+  else
+    printf '%sDifferences (expected: uptime, docker "Up" durations, kernel):%s\n\n' "$C_YELLOW" "$C_RESET"
+    cat "$tmpdir/diff.txt"
+    printf '\n'
+  fi
+  printf 'Uptime now:%s\n' "$(grep -i '^ *[0-9]*:[0-9]*' "$tmpdir/after.txt" | head -1)"
+  printf 'Snapshots kept in: %s\n\n' "$tmpdir"
+}
+
+# ------------------------------------------------------------------- probe
+# For identifying a host whose IP you have but whose identity you do not.
+cmd_probe() {
+  local target="${1:-}"
+  [ -z "$target" ] && { warn "usage: merc probe <ip-or-hostname>"; return 1; }
+  printf '\n%sProbing %s%s\n\n' "$C_BOLD" "$target" "$C_RESET"
+  command -v python3 >/dev/null 2>&1 || { warn "python3 required for probe"; return 1; }
+  python3 - "$target" <<'PY'
+import socket, sys, concurrent.futures
+t = sys.argv[1]
+try:
+    ip = socket.gethostbyname(t)
+except Exception as e:
+    print(f"  could not resolve {t}: {e}"); sys.exit(1)
+print(f"  resolved:      {ip}")
+try:
+    name = socket.getnameinfo((ip, 0), 0)[0]
+    print(f"  reverse DNS:   {name}")
+except Exception:
+    print("  reverse DNS:   (none)")
+try:
+    s = socket.create_connection((ip, 22), timeout=5); s.settimeout(4)
+    d = s.recv(256); s.close()
+    banner = d.decode("utf-8", "replace").strip().splitlines()
+    if banner and banner[0].startswith("SSH-"):
+        print(f"  SSH:           UP")
+        print(f"  banner:        {banner[0]}")
+        b = banner[0].lower()
+        if "ubuntu" in b: hint = "Ubuntu"
+        elif "debian" in b: hint = "Debian"
+        elif "centos" in b or "almalinux" in b or "rocky" in b: hint = "RHEL family"
+        else: hint = "unknown distro"
+        print(f"  looks like:    {hint} (from the banner - confirm by logging in)")
+    else:
+        print("  SSH:           port open but no valid banner")
+except Exception as e:
+    print(f"  SSH:           unreachable ({e.__class__.__name__})")
+
+ports = [22, 25, 53, 80, 443, 465, 587, 993, 995, 3000, 3001, 4190,
+         5432, 5678, 6379, 8000, 8080, 8181, 8443, 9000, 9001, 11434, 37789]
+def chk(p):
+    try:
+        s = socket.create_connection((ip, p), timeout=3); s.close(); return p
+    except Exception:
+        return None
+print()
+print("  open ports:")
+with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+    found = sorted(x for x in ex.map(chk, ports) if x)
+print("    " + (", ".join(str(p) for p in found) if found else "(none of the common ports)"))
+print()
+print("  NOTE: from a network behind an egress proxy every port may appear open.")
+print("  Run this from Cloud Shell or your own PC for a trustworthy result.")
+PY
+  printf '\n'
+}
+
 todo_usage() {
   cat <<'TUSAGE'
   merc todo add "text" [-d YYYY-MM-DD] [-p low|med|high|critical] [-c category]
@@ -427,13 +556,16 @@ usage() {
   cat <<EOF
 ${C_BOLD}MERC-OS CLI${C_RESET}
 
-  ${C_BLUE}merc hosts${C_RESET}                 inventory table
-  ${C_BLUE}merc status${C_RESET} [all|<id>]     TCP reachability on port ${SSH_PORT}
-  ${C_BLUE}merc audit${C_RESET}  <id>|all       run the read-only audit, pull the report back
-  ${C_BLUE}merc connect${C_RESET} <id>          ssh in with the recorded key
-  ${C_BLUE}merc sshconfig${C_RESET}             emit an ~/.ssh/config block (Terminus/CLI)
+  ${C_BLUE}merc hosts${C_RESET}                    inventory table
+  ${C_BLUE}merc status${C_RESET} [all|<id>]        SSH-banner-verified reachability
+  ${C_BLUE}merc audit${C_RESET}  <id>|all          run the read-only audit, pull the report back
+  ${C_BLUE}merc connect${C_RESET} <id>             ssh in with the recorded key
+  ${C_BLUE}merc sshconfig${C_RESET}                emit an ~/.ssh/config block (Terminus/CLI)
+  ${C_BLUE}merc reboot${C_RESET} <id>              gated reboot with before/after comparison
+  ${C_BLUE}merc probe${C_RESET} <ip-or-host>       identify an unknown host (banner + ports)
+
   ${C_BLUE}merc todo${C_RESET} add|list|due|done   reminders and outstanding items
-  ${C_BLUE}merc note${C_RESET} "<text>"            append a timestamped note to learning-notes.md
+  ${C_BLUE}merc note${C_RESET} "<text>"            append a note to learning-notes.md
   ${C_BLUE}merc sot${C_RESET}                      paths of the source-of-truth documents
 
   Reminders file: $REMINDERS
@@ -451,6 +583,8 @@ main() {
     audit|check)     cmd_audit "${1:-}" ;;
     connect|ssh|c)   cmd_connect "${1:-}" ;;
     sshconfig|cfg)   cmd_sshconfig "$@" ;;
+    reboot)         cmd_reboot "$@" ;;
+    probe|identify) cmd_probe "$@" ;;
     todo|remind|reminders) cmd_todo "$@" ;;
     note|log)        cmd_note "$@" ;;
     sot|paths)       cmd_sot ;;

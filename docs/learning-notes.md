@@ -244,3 +244,24 @@ out.
 
 **Principle:** the repo holds *structure and cadence*; the vault holds *credentials*; an
 encrypted store or paper in a safe holds *values*. Keep those three apart, always.
+
+---
+
+## 2026-09-15 03:20 — A substring match silently renamed a function
+
+While inserting the reboot and probe commands, `s.replace('usage() {\n', ...)` matched the
+first occurrence of that substring in the file — which was inside **`todo_usage() {`**, not
+the standalone `usage() {`. Result: `todo_usage() {` was split into an orphaned `todo_` line
+plus a new `usage() {`, leaving **two** `usage()` definitions. Bash silently used the last
+one, so `merc help` still looked correct and the breakage went unnoticed until a stray
+`todo_: command not found` appeared in the output.
+
+**Lesson:** `str.replace` and `sed` do not know about function boundaries. When patching
+generated or hand-written files, anchor on something unique — `^usage() {` with a line
+anchor, or better, match the whole construct. And a duplicate definition is not an error in
+bash: the last one wins, quietly. That is why the symptom was a stray line, not a crash.
+
+**Second lesson:** the reboot command's safety gate was verified by testing the *refusal*
+paths, not the happy path — empty confirmation aborts, wrong confirmation aborts, and an
+unreachable host is refused with "refusing to reboot a host I cannot verify". Never test a
+destructive command by running it against a real host; test that it says no.
