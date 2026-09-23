@@ -408,6 +408,9 @@ PostgreSQL + pgvector  |  Qdrant (tenant namespaces)
 Encrypted object storage for approved documents
 ```
 
+Everything below the reverse proxy is provisioned by `deploy/install.sh` (an existing box),
+`oci/terraform` (a new one), or `deploy/package.sh` + `scp` (an air-gapped one) — see §16.
+
 - **Pilot / single user:** Ollama + a 7–14B GGUF quantised model + local vector store.
 - **Multi-user GPU service:** vLLM behind the gateway, tenant-aware vector store, private subnet, no
   public model port.
@@ -431,12 +434,38 @@ Encrypted object storage for approved documents
 
 ## 12. Naming
 
-Shortlist considered: **GRiD-OS-SOVEREIGN**, VaultLLM, Blackbox Private AI, IntraMind, PrivateStack,
-ClosedCircuit AI, QuietCompute, Northstar Private AI.
+`GRiD-OS-SOVEREIGN` is the product name. Shortlist considered: GRiD-OS-SOVEREIGN, Sovereign,
+VaultLLM, Blackbox Private AI, IntraMind, PrivateStack, ClosedCircuit AI, QuietCompute, Northstar
+Private AI.
 
-`GRiD-OS-SOVEREIGN` is used here because it signals control and jurisdiction — the two things a UK legal or
-finance buyer is actually procuring — without implying the service is ungoverned. "Uncensored" as an
-identity attracts the wrong evaluation criteria and the wrong counsel.
+The name carries two claims and must carry both honestly:
+
+- **GRiD-OS** — this is infrastructure you operate, not a service you rent. An operating-system
+  framing invites the right questions (who patches it, who holds the keys, where does it run)
+  instead of the wrong ones (which vendor's policy changed this week).
+- **SOVEREIGN** — control and jurisdiction, the two things a UK legal or finance buyer is actually
+  procuring. It must never shade into "ungoverned". "Uncensored" as an identity attracts the wrong
+  evaluation criteria and the wrong counsel; sovereignty is a governance claim, not a permissions one.
+
+### The naming system is code
+
+One constant drives everything identifying — `NAME` in `assets/js/brand.js`:
+
+| Derivation | Value | Used for |
+| --- | --- | --- |
+| `NAME` | `GRiD-OS-SOVEREIGN` | wordmarks, titles, aria labels |
+| `LEGAL_NAME` | `GRiD-OS-SOVEREIGN Private AI` | footer, contracts, invoices |
+| `COMPACT` | `GRiD-OS` | top bar below 900 px (the full form is long by design) |
+| `SLUG` | `grid-os-sovereign` | storage keys, export filenames, install paths |
+| `CLI` | `grid-os` | the command typed in the hero terminal and in docs |
+| `MARK` | injected SVG | logo marks and the generated favicon |
+
+Internal identifiers follow the brand (`GRID_*` globals, `grid:` storage prefixes, `grid-os.css`,
+the `grid-os-sovereign` systemd unit, package and nginx names), so a rename does not leave a second
+vocabulary buried in the code. The mark is a mesh of nodes with one sealed at the centre: your grid,
+your private node. Renaming is still one constant, and `tests/smoke.mjs` proves it by patching `NAME`
+to `QuietCompute` and asserting that the legal name, compact form, slug, CLI string, hero transcript
+and every page title follow with no stale brand text left in the DOM.
 
 ---
 
@@ -481,12 +510,14 @@ wordmarks, aria labels and the favicon all derive from them, and `apply()` injec
 `.brand__mark` slot. Body copy stays in the pages — copy should be edited as copy — but nothing
 *identifying* is hardcoded anywhere else. The smoke test patches that one constant to `QuietCompute`
 and asserts no stale brand text survives in the rendered DOM, which is what makes "rename is one
-constant" a verified claim rather than a hopeful one.
+constant" a verified claim rather than a hopeful one. The derived forms (`COMPACT`, `SLUG`, `CLI`)
+and the naming rationale are in §12.
 
 ## 15. What the test suite verifies
 
-`npm test` runs two suites in jsdom with a real IndexedDB and WebCrypto shim, driving the actual UI
-rather than unit-testing helpers. 159 assertions:
+`npm test` runs three suites: two in jsdom with a real IndexedDB and WebCrypto shim, driving the
+actual UI rather than unit-testing helpers, and one that treats the deployment layer as code.
+378 assertions:
 
 | Area | Asserted behaviour |
 | --- | --- |
@@ -501,8 +532,48 @@ rather than unit-testing helpers. 159 assertions:
 | Lab | 4 tabs, 2 variants, ≥18 metrics, samples + rationale for permitted sets, 7-criterion rubric, disallowed tab withholds raw samples, **96% refusal coloured good not bad**, re-run updates a second-precise timestamp |
 | Brand | Wordmark/title/meta/favicon/mark injected; patching `NAME` alone renames every page with no stale text left |
 | Gateway | Proxy streams incrementally with `X-Accel-Buffering: no`; 502 explains the fix; probe discovers and injects models; endpoint marker proves real serving; eval stats become the metrics; TTFT from request start; SSE `usage` honoured; dead endpoint surfaces in the transcript; demo mode works offline |
+| Deployment | Scripts executable and syntax-clean; the installer's dry-run covers nine steps and changes nothing; `--render-only` correct in TLS and plain modes (tokens gone, buffering off, 600 s timeout, auth + allowlist injected, ACME path open); artifact checksummed, content-complete and byte-reproducible; `local.sh` really started and really serving; `verify.sh` passes on a live host, fails with exit 1 on a dead one, and emits valid JSON; Makefile forwards its variables; cloud-init parses and holds the 0600 env file, network wait and volume mount; Terraform opens no ingress on 11434/8080 and marks the password sensitive; both workflows parse, run their gates, and never use `secrets` in an `if:` |
 
-## 16. Pre-launch claim audit
+## 16. Automated deployment
+
+Four routes to a running host, each ending in verification rather than hope. Everything lives in
+`deploy/` and `oci/terraform/`; the reasoning is in `deploy/README.md`.
+
+| Route | Entry point | Automates |
+| --- | --- | --- |
+| Fastest, local | `deploy/local.sh` | node/Ollama presence, model host start, weight pull, app start, browser |
+| Fastest, VPS | `deploy/install.sh` | nine steps: preflight → node → Ollama → weights → app service → nginx → TLS → firewall → verify |
+| Air-gapped / audited | `deploy/package.sh` | reproducible tarball + sha256 + manifest + `INSTALL.txt` with the exact commands |
+| No box yet | `oci/terraform` | VCN, NSG, subnet, instance, model volume, cloud-init bootstrap, outputs |
+
+Three properties are worth defending in review:
+
+**Idempotence.** Re-running the installer upgrades in place: it checks for Ollama, node, existing
+models, existing units and an existing certificate before acting. Nothing is destructive, so the
+recovery plan for a failed upgrade is "run it again".
+
+**The plan is reviewable.** `--dry-run` prints every mutation, including the contents of the files it
+would write; `--render-only` prints the nginx site. An operator can read the whole change set before
+anything touches the machine — which is what a security reviewer will ask for.
+
+**Verification is a gate, not a checklist.** `deploy/verify.sh` exits non-zero when streaming is
+buffered, when the gateway answers without credentials, when 11434 or 8080 is reachable from outside,
+when the certificate expires within a week, or when Ollama is bound to something other than loopback.
+The installer runs it as step 9, CI runs it against a mock host, and the release pipeline runs it
+against the deployed host. The same script, three contexts.
+
+The Terraform NSG has exactly three ingress rules (22 from `admin_cidrs`, 443 from `allow_cidrs`, 80
+for the redirect and ACME challenge) and no rule for the model port; the services bind loopback
+anyway. Two controls, one policy — so a mistake in either does not publish the model host.
+
+Authentication stays at the edge. The app ships none of its own, `install.sh` can add nginx basic
+auth as a floor, and anything real goes through `auth_request` or an OIDC proxy. That boundary is
+deliberate: the browser holds the vault key, so an app-tier login would be a second lock on a door
+whose key never left the client.
+
+---
+
+## 17. Pre-launch claim audit
 
 Before publishing any of this externally, verify each claim against the deployed system:
 
@@ -518,3 +589,5 @@ Before publishing any of this externally, verify each claim against the deployed
 - [ ] Latency targets measured under realistic concurrency, not a cold single-user box.
 - [ ] Research/abliterated profiles are workspace-gated, tagged in the audit log, and never default.
 - [ ] The page itself ships no trackers, analytics or third-party beacons.
+- [ ] `deploy/verify.sh` passes against the production host, including `--public-host` exposure
+      checks and `--ssh` host-state checks, and its output is kept with the change record.

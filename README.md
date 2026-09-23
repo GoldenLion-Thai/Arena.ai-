@@ -21,7 +21,9 @@ python3 -m http.server 8080 --bind 0.0.0.0
 | [`app.html`](app.html) | The working workspace: streaming chat, encrypted local history, model picker with data-handling metadata, privacy-state panel, slash commands, `@`-knowledge, file indexing, gateway settings |
 | [`lab.html`](lab.html) | Behaviour Lab: standard vs refusal-reduced ("abliterated") profile side by side, per prompt-set tabs, blind tone rubric, length distribution, metric definitions |
 | [`DESIGN.md`](DESIGN.md) | The design guide: principles, layout blueprint, tokens, storage model, picker UX, streaming rules, benchmark method, claim audit |
-| [`deploy/`](deploy/) | OCI/VPC deployment: Ollama systemd drop-in, docker-compose, nginx with streaming-safe proxying, `.env.example`, hardening checklist |
+| [`deploy/`](deploy/) | Deployment automation: `install.sh` (VPS installer), `local.sh` (one-command local run), `package.sh` (reproducible artifact), `verify.sh` (post-deploy proof), `Makefile`, nginx template, Ollama systemd drop-in, docker-compose, cloud-init, hardening checklist |
+| [`oci/terraform/`](oci/terraform/) | Fully automated infrastructure on Oracle Cloud: VCN, NSG (22/80/443 only), GPU or A1 Flex instance, separate model-weight volume, cloud-init that installs and verifies the product |
+| [`.github/workflows/`](.github/workflows/) | CI (tests + deployment harness + Terraform validate) and the release pipeline (artifact → GitHub release → optional SSH deploy → optional `terraform apply`) |
 
 ## Architecture of the code
 
@@ -72,25 +74,55 @@ a static host, or an nginx/OCI bucket with no toolchain.
 > For Ollama: set `OLLAMA_ORIGINS` to include the origin serving this page, and remember the browser
 > must reach the host — a sandboxed browser cannot talk to `localhost` inside the sandbox.
 
-## Connect a real model (Ollama on your OCI box)
+## Deploy it
 
-The workspace ships on the **demo responder** so it is usable and honestly "local only" before you
-deploy anything. To serve real inference:
+Four routes, fastest first. Full detail in [`deploy/README.md`](deploy/README.md).
 
 ```bash
-# 1. on the model host — Ollama bound to loopback, never published
+# 1 · FASTEST, local — installs Ollama if needed, pulls a model, opens the browser
+bash deploy/local.sh                          # real inference
+bash deploy/local.sh --mock                   # no Ollama? demo host, zero downloads
+
+# 2 · FASTEST, a VPS you already have — one command, idempotent, TLS + auth + firewall
+curl -fsSL https://raw.githubusercontent.com/GoldenLion-Thai/Arena.ai-/main/deploy/install.sh \
+  | sudo bash -s -- --domain llm.example.com --email ops@example.com \
+                    --model qwen2.5:14b-instruct-q4_K_M --auth admin:CHANGE_ME
+bash deploy/install.sh --dry-run --domain llm.example.com      # review the plan first
+bash deploy/install.sh --render-only --domain llm.example.com  # review the nginx site
+
+# 3 · UPLOAD-READY ARTIFACT — reproducible, checksummed, for hosts without GitHub access
+bash deploy/package.sh                        # → dist/*.tar.gz + .sha256 + manifest.json + INSTALL.txt
+cd deploy && make deploy TARGET=ubuntu@1.2.3.4 DOMAIN=llm.example.com AUTH=admin:CHANGE_ME
+
+# 4 · FULLY AUTOMATED — provision the host itself on Oracle Cloud
+cd oci/terraform && terraform init && terraform apply
+```
+
+Every route ends with proof rather than assumption:
+
+```bash
+bash deploy/verify.sh --url https://llm.example.com --auth admin:pw \
+     --public-host 1.2.3.4 --expect-models --ssh ubuntu@1.2.3.4
+```
+
+`verify.sh` exits non-zero if streaming is buffered, if the gateway is reachable
+without credentials, if port 11434 is public, if the certificate expires within a
+week, or if Ollama is bound to anything but loopback. `--json` for CI.
+
+### Or wire a model host by hand
+
+```bash
+# model host — Ollama bound to loopback, never published
 curl -fsSL https://ollama.com/install.sh | sh
 sudo cp deploy/ollama.service /etc/systemd/system/ollama.service.d/override.conf
 sudo systemctl daemon-reload && sudo systemctl restart ollama
 ollama pull qwen2.5:14b-instruct-q4_K_M
 
-# 2. on the app host — one origin for UI and model
+# app host — one origin for UI and model
 OLLAMA_URL=http://127.0.0.1:11434 node server.js
-
-# 3. in the workspace — Settings → Model gateway
-#    Connection: "Same-origin proxy → Ollama"  →  Save & probe
 ```
 
+Then in the workspace: **Settings → Model gateway → “Same-origin proxy → Ollama” → Save & probe**.
 Probing lists what the endpoint actually has, injects those models into the picker under **Your
 endpoint**, and *Route: every model* replaces the demo responder entirely. Each message footer then
 shows the real endpoint, the model id that served it, and timings taken from Ollama's own
@@ -99,15 +131,12 @@ shows the real endpoint, the model id that served it, and timings taken from Oll
 Why the proxy: a browser cannot reach a private subnet, and Ollama rejects cross-origin requests
 unless `OLLAMA_ORIGINS` allows them. Serving UI and model from one origin removes CORS, works behind a
 preview host or load balancer, and keeps port 11434 unpublished. `server.js` forwards to exactly one
-target — it is not an open proxy. nginx, docker-compose and a hardening checklist are in
-[`deploy/README.md`](deploy/README.md).
+target — it is not an open proxy. vLLM, TGI and LiteLLM work the same way: point `OLLAMA_URL` at them
+and choose the OpenAI-compatible preset.
 
-vLLM, TGI and LiteLLM work the same way: point `OLLAMA_URL` at them and choose the
-OpenAI-compatible preset.
-
-> The live preview in this session runs against `tests/mock-ollama.mjs` — a faithful stand-in that
-> streams ndjson and reports eval stats — so you can exercise the whole gateway path in the browser
-> without a GPU. Responses are marked `MOCK-OLLAMA-9F3C` to keep that obvious.
+> The live preview in this session runs `deploy/local.sh --mock` — `tests/mock-ollama.mjs` is a
+> faithful stand-in that streams ndjson and reports eval stats, so the whole gateway path can be
+> exercised in a browser without a GPU. Responses are marked `MOCK-OLLAMA-9F3C` to keep that obvious.
 
 ## Rename the product
 
@@ -121,15 +150,19 @@ brand text survives in the rendered DOM. Swap `MARK` in the same file to change 
 The product itself has no build step and no runtime dependencies. Tests are dev-only:
 
 ```bash
-npm install          # jsdom + fake-indexeddb (devDependencies only)
-npm test             # 159 assertions: smoke suite + gateway integration suite
-npm run test:smoke   # UI behaviour only
-npm run test:gateway # boots a mock Ollama + the proxy, drives real streaming
-npm run mock         # mock inference host on :11500 for manual testing
-npm start            # static server + gateway proxy on 0.0.0.0:8080
+npm install           # jsdom + fake-indexeddb + js-yaml (devDependencies only)
+npm test              # 378 assertions: UI + gateway + deployment layer
+npm run test:smoke    # UI behaviour only            (114)
+npm run test:gateway  # mock Ollama + proxy + real streaming in the UI  (49)
+npm run test:deploy   # installer, packager, verifier, local.sh, make, cloud-init, terraform, CI (215)
+npm run mock          # mock inference host on :11500 for manual testing
+npm run local         # the fastest way to run the whole thing
+npm run package       # build the upload-ready artifact into dist/
+npm run verify        # prove a deployment (-- --url https://… --expect-models)
+npm start             # static server + gateway proxy on 0.0.0.0:8080
 ```
 
-`tests/smoke.mjs` (110 assertions) loads each page in jsdom with a real IndexedDB and WebCrypto shim
+`tests/smoke.mjs` (114 assertions) loads each page in jsdom with a real IndexedDB and WebCrypto shim
 and drives the actual UI: brand injection and the single-constant rename, theme re-tokening, a sent
 prompt with streaming to completion, TTFT/citations/throughput attached to the message, a generation
 stopped mid-stream with partial output preserved, the AES-GCM vault round-trip (including rejecting a
@@ -143,6 +176,19 @@ discovers models and injects them into the picker, a prompt is genuinely served 
 (marker text), Ollama's eval stats become the displayed metrics, TTFT is measured from request start,
 the OpenAI-compatible SSE transport works with `usage` accounting, a dead endpoint surfaces in the
 transcript instead of hanging, and switching back to the demo responder works with no network at all.
+
+`tests/deploy.mjs` (215 assertions) treats the deployment layer as code, not prose: every script is
+syntax-checked and executable; the installer's dry-run plan covers all nine steps and changes nothing
+on the machine; `--render-only` is checked in both TLS and plain-HTTP modes (tokens substituted,
+`proxy_buffering off`, 600 s read timeout, basic auth and allowlist injected, ACME path left open);
+`package.sh` is proven checksummed, content-complete, junk-free and **byte-reproducible**;
+`local.sh --mock` is really started and really serves the app; `verify.sh` is run against that live
+host (passing) and against a dead port (failing with exit 1, plus valid `--json`); the Makefile's
+targets forward their variables correctly; `cloud-init.yaml` is parsed as YAML and checked for the
+0600 env file, the network wait and the model-volume mount; the Terraform is checked for the absence
+of any ingress rule on 11434/8080, sensitive variables and cloud-init wiring; and both workflows are
+parsed, checked for the `secrets`-in-`if:` mistake GitHub Actions does not allow, and asserted to run
+the gates they claim.
 
 Optional visual capture (needs a Chromium binary, writes to gitignored `shots/`):
 
