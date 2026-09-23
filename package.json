@@ -1,0 +1,25 @@
+{
+  "name": "grid-os-sovereign",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GRiD-OS-SOVEREIGN — reference implementation of a privacy-first, local-first, chat-first private LLM interface with real Ollama/vLLM gateway wiring.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/smoke.mjs && node tests/gateway.mjs && node tests/deploy.mjs",
+    "test:smoke": "node tests/smoke.mjs",
+    "test:gateway": "node tests/gateway.mjs",
+    "test:deploy": "node tests/deploy.mjs",
+    "mock": "node tests/mock-ollama.mjs 11500",
+    "local": "bash deploy/local.sh",
+    "local:mock": "bash deploy/local.sh --mock",
+    "package": "bash deploy/package.sh",
+    "verify": "bash deploy/verify.sh",
+    "plan": "bash deploy/install.sh --dry-run --yes"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "js-yaml": "^4.3.2",
+    "jsdom": "^30.0.1"
+  }
+}

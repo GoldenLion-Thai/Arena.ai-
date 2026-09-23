@@ -1,0 +1,97 @@
+#cloud-config
+# =============================================================================
+# GRiD-OS-SOVEREIGN — first-boot bootstrap for a fresh VM/VPS
+#
+# Standalone version: edit the REPLACE_ME values below, then hand this file to
+# your provider as user-data (OCI/AWS/GCP/Azure all accept #cloud-config).
+# The Terraform version that fills these in automatically is
+# oci/terraform/cloud-init.tftpl.
+#
+# What happens on first boot:
+#   1  install curl/ca-certificates, wait for the network
+#   2  fetch deploy/install.sh from the repository (or use the copy on disk)
+#   3  run it non-interactively: node, ollama, models, app service, nginx, TLS,
+#      firewall, then deploy/verify.sh
+#   4  everything is logged to /var/log/grid-bootstrap.log and
+#      /var/log/grid-os-sovereign-install.log
+#
+# A model pull of 14B q4 takes ~3–10 minutes on a fast link; the whole boot
+# lands around 8–15 minutes. Watch it with:
+#   ssh ubuntu@HOST 'sudo tail -f /var/log/grid-os-sovereign-install.log'
+# =============================================================================
+
+package_update: true
+packages:
+  - curl
+  - ca-certificates
+  - jq
+  - rsync
+
+write_files:
+  - path: /etc/grid-os-sovereign.bootstrap.env
+    permissions: "0600"
+    content: |
+      # Edit these before booting, or let Terraform render them.
+      DOMAIN="llm.example.com"                 # REPLACE_ME (empty = no TLS, IP only)
+      EMAIL="ops@example.com"                  # REPLACE_ME (Let's Encrypt notices)
+      MODELS="qwen2.5:14b-instruct-q4_K_M"     # space-separated, repeatable
+      AUTH="admin:REPLACE_ME"                  # user:pass for nginx basic auth
+      ALLOW=""                                 # space-separated CIDRs (empty = any)
+      TLS="auto"                               # auto|certbot|self|off
+      REPO="GoldenLion-Thai/Arena.ai-"
+      REF="main"
+      KEEP_ALIVE="30m"
+
+  - path: /usr/local/bin/grid-bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -uo pipefail
+      exec >>/var/log/grid-bootstrap.log 2>&1
+      echo "== GRiD-OS-SOVEREIGN bootstrap $(date -Is)"
+
+      # wait for the network (cloud-init can beat DHCP on some images)
+      for _ in $(seq 1 60); do
+        curl -fsS --max-time 3 https://raw.githubusercontent.com >/dev/null 2>&1 && break
+        sleep 5
+      done
+
+      . /etc/grid-os-sovereign.bootstrap.env
+
+      ARGS=(--yes)
+      [[ -n "${DOMAIN:-}" ]] && ARGS+=(--domain "$DOMAIN")
+      [[ -n "${EMAIL:-}" ]]  && ARGS+=(--email "$EMAIL")
+      [[ -n "${TLS:-}" ]]    && ARGS+=(--tls "$TLS")
+      [[ -n "${AUTH:-}" ]]   && ARGS+=(--auth "$AUTH")
+      [[ -n "${KEEP_ALIVE:-}" ]] && ARGS+=(--keep-alive "$KEEP_ALIVE")
+      for m in ${MODELS:-}; do ARGS+=(--model "$m"); done
+      for c in ${ALLOW:-}; do ARGS+=(--allow "$c"); done
+
+      # An attached model volume, if the provider gave us one: format, mount,
+      # and put the weights on it so they survive instance replacement.
+      DEV="$(lsblk -dnpo NAME,TYPE | awk '$2=="disk" && $1!~/(sda|nvme0n1|xvda)$/ {print $1; exit}')"
+      if [[ -n "${DEV:-}" ]]; then
+        echo "== mounting extra volume ${DEV} at /var/lib/ollama/models"
+        blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -q -F "$DEV"
+        mkdir -p /var/lib/ollama/models
+        mount "$DEV" /var/lib/ollama/models 2>/dev/null || true
+        UUID="$(blkid -s UUID -o value "$DEV" 2>/dev/null || true)"
+        [[ -n "$UUID" ]] && echo "UUID=$UUID /var/lib/ollama/models ext4 defaults,nofail 0 2" >> /etc/fstab
+      fi
+
+      INSTALLER="/tmp/grid-install.sh"
+      if curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install.sh" -o "$INSTALLER"; then
+        echo "== running installer fetched from ${REPO}@${REF}"
+        bash "$INSTALLER" --source "https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz" "${ARGS[@]}"
+      else
+        echo "== could not fetch the installer — is egress to raw.githubusercontent.com allowed?"
+        exit 1
+      fi
+
+      echo "== bootstrap finished $(date -Is)"
+
+runcmd:
+  - [bash, -c, "systemctl restart ollama 2>/dev/null || true"]
+  - /usr/local/bin/grid-bootstrap.sh
+
+final_message: "GRiD-OS-SOVEREIGN bootstrap finished after $UPTIME seconds"

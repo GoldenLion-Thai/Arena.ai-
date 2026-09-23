@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+
+jobs:
+  test:
+    name: UI + gateway + deployment layer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # No lockfile is committed (zero runtime deps, two dev deps), so install.
+      - name: Install dev dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Unit + integration suites
+        run: npm test
+
+      - name: Shell syntax
+        run: |
+          for f in deploy/*.sh; do printf '%-24s' "$f"; bash -n "$f" && echo OK; done
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./deploy
+          severity: warning
+        continue-on-error: true
+
+      # The deployment harness against a real (mock) model host: proves the
+      # installer's renderer, the packager and the verifier all work.
+      - name: Deployment harness end-to-end
+        run: |
+          node tests/mock-ollama.mjs 11500 &
+          MOCK=$!
+          OLLAMA_URL=http://127.0.0.1:11500 PORT=8080 HOST=0.0.0.0 node server.js &
+          APP=$!
+          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.5; done
+          bash deploy/verify.sh --url http://127.0.0.1:8080 --expect-models
+          RC=$?
+          kill $MOCK $APP 2>/dev/null || true
+          exit $RC
+
+      - name: Installer plan (dry run, changes nothing)
+        run: |
+          bash deploy/install.sh --dry-run --yes \
+            --domain ci.example.com --email ci@example.com \
+            --model qwen2.5:7b-instruct-q4_K_M --auth admin:pw --allow 203.0.113.0/24 \
+            | tee /tmp/plan.txt
+          grep -q "\[9/9\] verification" /tmp/plan.txt
+          grep -q "grid-os-sovereign.service" /tmp/plan.txt
+          grep -q "certbot" /tmp/plan.txt
+
+      - name: nginx template renders clean
+        run: |
+          bash deploy/install.sh --render-only --domain ci.example.com --auth admin:pw > /tmp/site.conf
+          ! grep -v '^\s*#' /tmp/site.conf | grep -q '{{'
+          grep -q 'listen 443 ssl' /tmp/site.conf
+          grep -q 'auth_basic' /tmp/site.conf
+          bash deploy/install.sh --render-only --tls off > /tmp/site-http.conf
+          grep -q 'listen 80 default_server' /tmp/site-http.conf
+          ! grep -q 'listen 443' /tmp/site-http.conf
+
+      - name: Artifact is reproducible
+        run: |
+          bash deploy/package.sh --out /tmp/dist-a
+          bash deploy/package.sh --out /tmp/dist-b
+          A=$(sha256sum /tmp/dist-a/*.tar.gz | cut -d' ' -f1)
+          B=$(sha256sum /tmp/dist-b/*.tar.gz | cut -d' ' -f1)
+          echo "a=$A"; echo "b=$B"
+          [ "$A" = "$B" ]
+
+  terraform:
+    name: Terraform validate (oci/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: oci/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+      - name: fmt
+        run: terraform fmt -check -recursive -diff || (terraform fmt -recursive -diff; exit 1)
+      - name: init
+        run: terraform init -backend=false -input=false
+      - name: validate
+        run: terraform validate
+      - name: plan renders cloud-init
+        run: |
+          terraform plan -input=false -refresh=false \
+            -var tenancy_ocid=ocid1.tenancy.oc1..fakeforvalidateonly \
+            -var 'models=["qwen2.5:7b"]' -var auth_pass=ci-only || \
+          echo "plan needs live credentials in CI — validate + fmt are the gate here"

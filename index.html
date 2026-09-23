@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GRiD-OS-SOVEREIGN — Private intelligence, on your terms</title>
+    <meta
+      name="description"
+      content="Run capable language models inside infrastructure you control. Private document intelligence, inspectable data boundaries, and governance by design for legal, finance and compliance teams."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/css/grid-os.css" />
+    <script src="assets/js/brand.js"></script>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090b10'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23c8ff3d'/%3E%3C/svg%3E"
+    />
+  </head>
+
+  <body>
+    <!-- ============================== top bar ============================== -->
+    <header class="topbar">
+      <div class="topbar__inner wrap">
+        <a class="brand" href="index.html" data-brand-aria="{name} — home"><span class="brand__mark" data-brand-mark></span> <span data-brand="name" class="brand__full">GRiD-OS-SOVEREIGN</span><span data-brand="compact" class="brand__compact">GRiD-OS</span></a>
+        <nav class="nav" aria-label="Primary">
+          <a href="#product">Product</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#models">Models</a>
+          <a href="lab.html">Behaviour Lab</a>
+          <a href="DESIGN.md">Design system</a>
+        </nav>
+        <div class="grow"></div>
+        <span class="tag" title="Deployment target"><span class="dot dot--local"></span>SELF-HOSTED · UK REGION</span>
+        <a class="btn btn--primary btn--sm" href="app.html">Launch workspace</a>
+      </div>
+    </header>
+
+    <!-- ================================ hero =============================== -->
+    <section class="hero">
+      <div class="wrap hero__grid">
+        <div>
+          <span class="eyebrow">Private AI infrastructure</span>
+          <h1>Private intelligence, <em>on your terms.</em></h1>
+          <p class="hero__sub">
+            Run capable language models in your own environment. Keep documents, conversations and IP under your
+            control — with the data boundary visible in the interface, not buried in a policy page.
+          </p>
+          <div class="hero__cta">
+            <a class="btn btn--primary" href="app.html">Deploy your workspace →</a>
+            <a class="btn btn--ghost" href="#architecture">View architecture</a>
+          </div>
+          <div class="hero__meta">
+            <span class="tag tag--accent"><span class="dot dot--local"></span>No prompt retention</span>
+            <span class="tag">Open-weight models</span>
+            <span class="tag">OpenAI-compatible API</span>
+            <span class="tag tag--verified">AES-256 at rest</span>
+          </div>
+        </div>
+
+        <div class="mock" aria-hidden="true">
+          <div class="mock__bar">
+            <span class="mock__lights"><i></i><i></i><i></i></span>
+            <span class="mono"><span data-brand="cli">grid-os</span> · legal-ops · qwen2.5:14b-instruct-q4_K_M</span>
+            <div class="grow"></div>
+            <span class="mono" style="color:var(--accent)">● local-only</span>
+          </div>
+          <div class="mock__body" id="term"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ trust strip ============================ -->
+    <div class="trust">
+      <div class="wrap trust__inner">
+        <span class="trust__item"><span class="dot dot--local"></span>Self-hosted</span>
+        <span class="trust__item"><span class="dot dot--cloud"></span>VPC-ready</span>
+        <span class="trust__item"><span class="dot"></span>Encrypted at rest</span>
+        <span class="trust__item"><span class="dot"></span>Role-based access</span>
+        <span class="trust__item"><span class="dot"></span>No training on your data</span>
+        <span class="trust__item"><span class="dot"></span>Audit logged</span>
+        <div class="grow"></div>
+        <span class="mono">Claims are design targets — see the note at the foot of this page</span>
+      </div>
+    </div>
+
+    <!-- ============================== product ============================== -->
+    <section class="section" id="product">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">The product</span>
+          <h2>Built for confidential work.</h2>
+          <p>
+            One focused chat surface, progressive disclosure for everything else, and controls that answer the only
+            question that matters before you paste a contract: <b style="color:var(--text)">where does this go?</b>
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <article class="card card--hover card--glow feat">
+            <div class="feat__icon">§</div>
+            <h3>Private document intelligence</h3>
+            <p>Ask questions across contracts, policies, financial models and case files. Every answer carries the source span it came from.</p>
+            <div class="feat__meta"><span class="tag">RAG</span><span class="tag">Citations</span><span class="tag">Chunk provenance</span></div>
+          </article>
+
+          <article class="card card--hover feat">
+            <div class="feat__icon">◧</div>
+            <h3>Your choice of models</h3>
+            <p>Open-weight models for writing, reasoning, coding, vision and classification — swapped per conversation, not per licence negotiation.</p>
+            <div class="feat__meta"><span class="tag">Qwen</span><span class="tag">Mistral</span><span class="tag">Llama</span><span class="tag">Phi-4</span></div>
+          </article>
+
+          <article class="card card--hover feat">
+            <div class="feat__icon">▤</div>
+            <h3>Controlled knowledge base</h3>
+            <p>Retrieval is connected only to approved internal sources, in the location you select: this device, your private cloud, or a shared team vault.</p>
+            <div class="feat__meta"><span class="tag">pgvector</span><span class="tag">Qdrant</span><span class="tag">Tenant namespaces</span></div>
+          </article>
+
+          <article class="card card--hover feat">
+            <div class="feat__icon">⚿</div>
+            <h3>Governance by design</h3>
+            <p>User roles, audit logs, retention windows and workspace separation exposed as product controls an auditor can inspect.</p>
+            <div class="feat__meta"><span class="tag">RBAC</span><span class="tag">Retention</span><span class="tag">Audit trail</span></div>
+          </article>
+
+          <article class="card card--hover feat">
+            <div class="feat__icon">⌁</div>
+            <h3>Low-latency streaming</h3>
+            <p>Server-sent events, buffered rendering, and a real time-to-first-token readout per message. Stop cancels inference, and partial output is kept.</p>
+            <div class="feat__meta"><span class="tag">TTFT 200–400 ms</span><span class="tag">SSE</span><span class="tag">Abortable</span></div>
+          </article>
+
+          <article class="card card--hover feat">
+            <div class="feat__icon">◉</div>
+            <h3>Local-first by default</h3>
+            <p>Conversations are encrypted in the browser with a key derived from your passphrase. Cloud features sit behind explicit permission gates.</p>
+            <div class="feat__meta"><span class="tag">IndexedDB</span><span class="tag">AES-GCM 256</span><span class="tag">PBKDF2 210k</span></div>
+          </article>
+        </div>
+
+        <div class="grid-2" style="margin-top:16px">
+          <a class="card card--hover" href="app.html">
+            <span class="eyebrow">Live interface</span>
+            <h3 style="font-size:20px;margin:10px 0 8px">Open the workspace →</h3>
+            <p class="muted" style="font-size:14px">
+              A working chat shell: encrypted local history, model picker with data-handling metadata, privacy-state
+              panel, slash commands, streaming with TTFT metrics. Runs entirely in your browser.
+            </p>
+          </a>
+          <a class="card card--hover" href="lab.html">
+            <span class="eyebrow" style="color:var(--research)">Evaluation</span>
+            <h3 style="font-size:20px;margin:10px 0 8px">Behaviour Lab →</h3>
+            <p class="muted" style="font-size:14px">
+              Side-by-side comparison of a standard model profile against a refusal-reduced “abliterated” research
+              profile: tone, length, refusal rate, over-refusal, unsafe completion, latency.
+            </p>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ how it works =========================== -->
+    <section class="section" style="padding-top:0">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">How it works</span>
+          <h2>Four steps, all inside your boundary.</h2>
+        </div>
+        <div class="steps">
+          <div class="step"><h3>Connect approved documents</h3><p>Point at the sources you have cleared for use. Nothing else is reachable by retrieval.</p></div>
+          <div class="step"><h3>Index inside your environment</h3><p>Chunk, hash and embed locally or in your VPC. Chunks carry offsets so citations resolve to an exact span.</p></div>
+          <div class="step"><h3>Chat with a chosen model</h3><p>Pick per conversation. The picker shows location, speed, context, memory and policy profile before you send.</p></div>
+          <div class="step"><h3>Keep references and controls attached</h3><p>Sources, token counts, latency and access decisions travel with the transcript for audit.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ architecture =========================== -->
+    <section class="section" id="architecture" style="padding-top:0">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">Architecture</span>
+          <h2>Credible by construction.</h2>
+          <p>No public model port, no key in prompt context, tenant-separated retrieval, and an audit trail that a due-diligence reviewer can actually read.</p>
+        </div>
+
+        <div class="arch">
+          <div class="arch__flow">
+            <div class="node"><span class="node__k">01</span><span class="node__t">User / browser</span><span class="node__d">encrypted local history</span></div>
+            <div class="connector"></div>
+            <div class="node"><span class="node__k">02</span><span class="node__t">Reverse proxy + WAF</span><span class="node__d">TLS · private subnet</span></div>
+            <div class="connector"></div>
+            <div class="node"><span class="node__k">03</span><span class="node__t">AuthN + workspace RBAC</span><span class="node__d">scoped tokens · audit</span></div>
+            <div class="connector"></div>
+            <div class="node"><span class="node__k">04</span><span class="node__t">Model gateway</span><span class="node__d">OpenAI-compatible /v1</span></div>
+            <div class="connector"></div>
+            <div class="node"><span class="node__k">05</span><span class="node__t">vLLM · Ollama runtime</span><span class="node__d">continuous batching</span></div>
+            <div class="connector"></div>
+            <div class="node"><span class="node__k">06</span><span class="node__t">Quantised open weights</span><span class="node__d">Qwen · Mistral · Llama · Phi-4</span></div>
+            <div class="connector"></div>
+            <div class="node"><span class="node__k">07</span><span class="node__t">PostgreSQL + pgvector / Qdrant</span><span class="node__d">tenant namespaces</span></div>
+            <div class="connector"></div>
+            <div class="node"><span class="node__k">08</span><span class="node__t">Encrypted object storage</span><span class="node__d">approved documents</span></div>
+          </div>
+
+          <div class="stack" style="gap:16px">
+            <div class="card">
+              <span class="eyebrow">Deployment</span>
+              <div class="badges" style="margin-top:12px">
+                <span class="tag">OCI</span><span class="tag">Docker</span><span class="tag">Ollama</span>
+                <span class="tag">vLLM</span><span class="tag">TGI</span><span class="tag">OpenAI-compatible API</span>
+              </div>
+              <p class="muted" style="font-size:13.5px;margin-top:14px;line-height:1.65">
+                <b style="color:var(--text)">Pilot, single user:</b> Ollama + a 7–14B GGUF quantised model + a local
+                vector store.<br />
+                <b style="color:var(--text)">Multi-user GPU service:</b> vLLM with continuous batching behind the
+                gateway, tenant-aware vector store.<br />
+                <b style="color:var(--text)">Sensitive business data:</b> private subnet, server-side encryption, RBAC,
+                audit trail, separate tenant namespaces.
+              </p>
+            </div>
+
+            <div class="card">
+              <span class="eyebrow">Latency targets</span>
+              <div class="table-wrap" style="border:0;margin-top:12px">
+                <table>
+                  <tbody>
+                    <tr><td>Time to first token</td><td class="mono-cell" style="text-align:right">200–400 ms</td></tr>
+                    <tr><td>Perceived “slow”</td><td class="mono-cell" style="text-align:right">&gt; 800 ms</td></tr>
+                    <tr><td>Render flush interval</td><td class="mono-cell" style="text-align:right">30–80 ms</td></tr>
+                    <tr><td>Transport</td><td class="mono-cell" style="text-align:right">SSE (WS if bidirectional)</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="callout callout--accent">
+              <b>Never put API keys in prompt context.</b> Credentials belong in a secrets manager or the OS keychain,
+              scoped and rotatable, invisible to the model and to the transcript.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================== models ============================== -->
+    <section class="section" id="models" style="padding-top:0">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">Open-weight shortlist</span>
+          <h2>Start where the tooling already is.</h2>
+          <p>Broad runtime support, quantised releases, a licence you have actually read, and a size that fits the hardware you own. “Open” does not remove the need to check licence terms and provenance.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Model</th><th>Best use</th><th>Deployment fit</th><th>Starting point</th><th>Licence note</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>Qwen 2.5 / Qwen 3 Instruct</b></td>
+                <td>General business work, multilingual, structured output</td>
+                <td>Widely available in GGUF; strong runtime support</td>
+                <td class="mono-cell">7B–14B quantised · ~9 GB</td>
+                <td class="mono-cell">Apache-2.0</td>
+              </tr>
+              <tr>
+                <td><b>Mistral 7B / Small</b></td>
+                <td>Fast assistant, summarisation, document chat</td>
+                <td>Efficient variants, mature ecosystem</td>
+                <td class="mono-cell">7B–12B quantised · ~7.5 GB</td>
+                <td class="mono-cell">Check per release</td>
+              </tr>
+              <tr>
+                <td><b>Llama 3.x Instruct</b></td>
+                <td>General chat and RAG</td>
+                <td>Broadest community tooling</td>
+                <td class="mono-cell">8B quantised · ~5 GB</td>
+                <td class="mono-cell">Community licence — review AUP + MAU terms</td>
+              </tr>
+              <tr>
+                <td><b>Gemma family</b></td>
+                <td>Compact local assistance</td>
+                <td>Good for small private deployments</td>
+                <td class="mono-cell">4B–12B quantised</td>
+                <td class="mono-cell">Gemma terms of use</td>
+              </tr>
+              <tr>
+                <td><b>Phi-4 class</b></td>
+                <td>Small-footprint structured business tasks</td>
+                <td>Fits a single GPU with context headroom</td>
+                <td class="mono-cell">~14B · ~10 GB Q4</td>
+                <td class="mono-cell">MIT</td>
+              </tr>
+              <tr>
+                <td><b>Qwen Coder</b></td>
+                <td>Code generation, scripts, technical review</td>
+                <td>Specialist option, not the default chat model</td>
+                <td class="mono-cell">7B–14B quantised</td>
+                <td class="mono-cell">Apache-2.0</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== palette ============================== -->
+    <section class="section" style="padding-top:0" id="design">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">Design system</span>
+          <h2>One accent, used deliberately.</h2>
+          <p>
+            Minimal interfaces survive on whitespace, hierarchy and a limited palette. Excess accent colour makes a
+            privacy product feel like a trading terminal. Try the three themes — the whole page re-tokens live.
+          </p>
+        </div>
+
+        <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:20px">
+          <button class="btn btn--sm" data-theme="midnight">Midnight Vault</button>
+          <button class="btn btn--sm btn--ghost" data-theme="obsidian">Obsidian + Acid Lime</button>
+          <button class="btn btn--sm btn--ghost" data-theme="navy">Deep Navy + Cyan</button>
+          <span class="mono" id="themeNote">Default: Midnight Vault — legal, finance, enterprise private cloud</span>
+        </div>
+
+        <div class="grid-3" id="swatches"></div>
+
+        <div class="grid-2" style="margin-top:16px">
+          <div class="card">
+            <span class="eyebrow">Typography</span>
+            <div style="margin-top:14px;display:grid;gap:12px">
+              <div><span class="mono">Display · Space Grotesk</span><div style="font-family:var(--font-display);font-size:26px;letter-spacing:-0.02em">Private intelligence</div></div>
+              <div><span class="mono">Body · Inter</span><div style="font-size:15px;color:var(--text-2)">Retrieval hits the local index only, and the transcript is written to encrypted storage with latency metadata attached.</div></div>
+              <div><span class="mono">Technical metadata · JetBrains Mono</span><div style="font-family:var(--font-mono);font-size:12px;color:var(--accent)">TTFT 286 ms · 41 tok/s · UK-EU-WEST · AES-256</div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <span class="eyebrow">Copy system</span>
+            <div class="table-wrap" style="border:0;margin-top:14px">
+              <table>
+                <thead><tr><th>Avoid</th><th>Prefer</th></tr></thead>
+                <tbody>
+                  <tr><td class="dim">“Military-grade privacy”</td><td>Chats are encrypted and stored in your selected workspace.</td></tr>
+                  <tr><td class="dim">“Your data is safe”</td><td>This request is processed in your UK private cloud workspace.</td></tr>
+                  <tr><td class="dim">“Uncensored AI”</td><td>Research model profile: reduced refusal controls.</td></tr>
+                  <tr><td class="dim">“Powered by AI”</td><td>Qwen 14B Instruct · Private VPC · Knowledge retrieval on.</td></tr>
+                  <tr><td class="dim">“We respect privacy”</td><td>Telemetry is off. Nothing is sent externally without permission.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= final CTA ============================= -->
+    <section class="section" style="padding-top:0">
+      <div class="wrap">
+        <div class="card" style="padding:44px;border-radius:var(--r-xl);text-align:center;border-color:rgba(200,255,61,0.22);background:radial-gradient(ellipse 80% 120% at 50% -20%, rgba(200,255,61,0.09), transparent 70%)">
+          <span class="eyebrow">Final word</span>
+          <h2 style="font-size:clamp(28px,4vw,44px);margin:14px auto 12px;max-width:20ch">Keep your competitive advantage private.</h2>
+          <p class="muted" style="max-width:56ch;margin-inline:auto;font-size:16px">
+            Draft agreements, financial models and client files are not training data. Deploy a workspace where the
+            boundary is a control you can see.
+          </p>
+          <div class="row" style="justify-content:center;margin-top:26px;gap:12px;flex-wrap:wrap">
+            <a class="btn btn--primary" href="app.html">Start with a secure workspace</a>
+            <a class="btn btn--ghost" href="lab.html">See the behaviour benchmarks</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================== footer ============================== -->
+    <footer class="footer">
+      <div class="wrap">
+        <div class="footer__grid">
+          <div>
+            <a class="brand" href="index.html" data-brand-aria="{name} — home"><span class="brand__mark" data-brand-mark></span> <span data-brand="name" class="brand__full">GRiD-OS-SOVEREIGN</span><span data-brand="compact" class="brand__compact">GRiD-OS</span></a>
+            <p class="muted" style="font-size:13.5px;margin-top:12px;max-width:38ch;line-height:1.65">
+              <span data-brand="positioning">Your AI. Your grid. Your data.</span> Private language models
+              for sensitive work — with the audit trail to prove it.
+            </p>
+          </div>
+          <div>
+            <h4>Product</h4>
+            <ul>
+              <li><a href="app.html">Workspace</a></li>
+              <li><a href="lab.html">Behaviour Lab</a></li>
+              <li><a href="#models">Model shortlist</a></li>
+              <li><a href="#architecture">Architecture</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Build</h4>
+            <ul>
+              <li><a href="DESIGN.md">Design guide</a></li>
+              <li><a href="assets/css/grid-os.css">Design tokens</a></li>
+              <li><a href="assets/js/engine.js">Streaming engine</a></li>
+              <li><a href="assets/js/vault.js">Client-side encryption</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Deployment</h4>
+            <ul>
+              <li><a href="#architecture">OCI / VPC</a></li>
+              <li><a href="#architecture">Ollama pilot</a></li>
+              <li><a href="#architecture">vLLM production</a></li>
+              <li><a href="app.html">Gateway settings</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="notice">
+          <b style="color:var(--text-2)">Honesty note.</b> Every privacy claim on this page is a design target for the
+          reference architecture, not a warranty. Before publishing: confirm your gateway disables provider training in
+          writing, verify data residency for inference and embeddings, test that deletion removes vector-index chunks
+          (not just records), and have counsel review the retention and DSAR position. The default responder in the demo
+          workspace is an on-device stub — point Settings → Model gateway at your own Ollama or vLLM endpoint for real
+          inference. “Abliterated” configurations are labelled research profiles and are never a default.
+        </div>
+
+        <div class="row-between" style="margin-top:24px">
+          <span class="mono">© <span data-brand="year">2026</span> <span data-brand="legal">GRiD-OS-SOVEREIGN Private AI</span> · Reference implementation</span>
+          <span class="mono">No trackers · No analytics · No cookies</span>
+        </div>
+      </div>
+    </footer>
+
+    <script src="assets/js/md.js"></script>
+    <script src="assets/js/landing.js"></script>
+  </body>
+</html>
