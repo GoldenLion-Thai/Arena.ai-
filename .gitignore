@@ -1,0 +1,19 @@
+# Never commit identifiers, keys or local recovery state
+.kami-recovery/
+kami-recovery/
+.env
+*.env
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.pub
+
+# audit reports pulled back from hosts (may contain hostnames/layouts)
+reports/
+
+# local reminder store (personal/business items - must never be committed)
+.merc/
+merc-reminders.tsv

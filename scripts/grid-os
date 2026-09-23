@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Backwards-compatible shim: the CLI is now called `merc` (estate renamed to MERC-OS).
+# Old muscle memory and any saved snippets keep working.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec bash "$DIR/merc" "$@"
