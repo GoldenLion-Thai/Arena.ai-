@@ -22,6 +22,7 @@
 #   3  ollama       official installer, GitHub release fallback, systemd hardening
 #   4  models       ollama pull for every --model (idempotent, resumable)
 #   5  app          files to /opt/grid-os-sovereign, system user, systemd unit
+#   5b platform     --platform: the KiNETiC-Ai data tier (RAG + wiki) on loopback
 #   6  edge         nginx site from template: TLS, basic auth, IP allowlist
 #   7  tls          certbot (Let's Encrypt) or self-signed, or off
 #   8  firewall     ufw/firewalld: 22/80/443 open, 8080/11434 loopback only
@@ -49,6 +50,9 @@ AUTH_PASS=""
 TLS="auto"                # auto | certbot | self | off
 APP_DIR="/opt/grid-os-sovereign"
 APP_PORT="8080"
+PLATFORM=0                 # --platform: run the KiNETiC-Ai data tier on this host
+PLATFORM_PORT="8090"       # loopback only; the app tier proxies /platform/* to it
+EMBED_MODEL="nomic-embed-text"
 OLLAMA_HOST="127.0.0.1:11434"
 KEEP_ALIVE="30m"
 GPU="auto"                # auto | cuda | rocm | cpu
@@ -78,7 +82,8 @@ fi
 
 step=0
 say()  { printf '%s\n' "$*"; }
-head_step() { step=$((step + 1)); printf '\n%s[%d/9] %s%s\n' "$C_ACC" "$step" "$*" "$C_OFF"; }
+STEPS=9   # recomputed after parsing: --platform adds the data tier step
+head_step() { step=$((step + 1)); printf '\n%s[%d/%d] %s%s\n' "$C_ACC" "$step" "$STEPS" "$*" "$C_OFF"; }
 info() { printf '  %s·%s %s\n' "$C_DIM" "$C_OFF" "$*"; }
 good() { printf '  %s✓%s %s\n' "$C_OK" "$C_OFF" "$*"; }
 warn() { printf '  %s!%s %s\n' "$C_WARN" "$C_OFF" "$*"; }
@@ -175,6 +180,9 @@ Flags
   --gpu MODE             auto|cuda|rocm|cpu
   --source DIR|TARBALL|URL  Where the app files come from (default: this checkout)
   --repo OWNER/NAME --ref REF  GitHub source when no local checkout is present
+  --platform             Also run the KiNETiC-Ai data tier (RAG + wiki) on this host
+  --platform-port N      Platform listen port on loopback (default 8090)
+  --embed-model NAME     Embedding model to pull and use (default nomic-embed-text)
   --skip-ollama | --skip-app | --skip-nginx | --skip-firewall | --skip-verify
   --render-only          Print the rendered nginx site and exit (no changes made)
   --out FILE             With --render-only, write the site here instead of stdout
@@ -201,6 +209,9 @@ while [[ $# -gt 0 ]]; do
     --source)        SOURCE="${2:-}"; shift 2 ;;
     --repo)          REPO="${2:-}"; shift 2 ;;
     --ref)           REF="${2:-}"; shift 2 ;;
+    --platform)      PLATFORM=1; shift ;;
+    --platform-port) PLATFORM_PORT="${2:-}"; shift 2 ;;
+    --embed-model)   EMBED_MODEL="${2:-}"; shift 2 ;;
     --skip-ollama)   SKIP_OLLAMA=1; shift ;;
     --skip-app)      SKIP_APP=1; shift ;;
     --skip-nginx)    SKIP_NGINX=1; shift ;;
@@ -216,6 +227,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#MODELS[@]} -eq 0 ]]; then MODELS=("qwen2.5:7b-instruct-q4_K_M"); fi
+STEPS=$((9 + PLATFORM))
 SITE_NAME="grid-os-sovereign"
 HTPASSWD="/etc/nginx/.grid-os-sovereign.htpasswd"
 TLS_CERT_PATH="/etc/ssl/grid-os-sovereign/fullchain.pem"
@@ -429,12 +441,16 @@ else
   run rsync -a --delete --exclude node_modules "$SRC"/ "$APP_DIR"/
 fi
 
+PLATFORM_ENV_LINE="# PLATFORM_URL not set — re-run with --platform to enable the KiNETiC-Ai data tier"
+if [[ $PLATFORM -eq 1 ]]; then PLATFORM_ENV_LINE="PLATFORM_URL=http://127.0.0.1:${PLATFORM_PORT}"; fi
+
 write_file "/etc/grid-os-sovereign.env" <<EOF
 # Written by deploy/install.sh — the app tier reads this and nothing else.
 PORT=${APP_PORT}
 HOST=127.0.0.1
 OLLAMA_URL=http://${OLLAMA_HOST}
 GATEWAY_PREFIX=/gateway/
+${PLATFORM_ENV_LINE}
 EOF
 
 run chown -R "${SERVICE_USER}:${SERVICE_USER}" "$APP_DIR"
@@ -475,6 +491,75 @@ EOF
   run systemctl restart grid-os-sovereign.service || true
 else
   warn "no systemd — start manually:  cd ${APP_DIR} && PORT=${APP_PORT} HOST=127.0.0.1 OLLAMA_URL=http://${OLLAMA_HOST} node server.js"
+fi
+
+# ==================================================== 5b · KiNETiC-Ai platform
+if [[ $PLATFORM -eq 1 ]]; then
+  head_step "platform (KiNETiC-Ai — RAG + wiki)"
+  PLATFORM_DATA_DIR="/var/lib/kinetic-ai"
+  run mkdir -p "$PLATFORM_DATA_DIR"
+  run chown -R "${SERVICE_USER}:${SERVICE_USER}" "$PLATFORM_DATA_DIR"
+
+  # parseArgs() in platform/server.mjs reads exactly these names.
+  write_file "/etc/kinetic-ai.env" <<EOF
+# Written by deploy/install.sh — the KiNETiC-Ai data platform reads this.
+# Loopback only: the app tier proxies /platform/* to it, so the browser never
+# talks to this port directly and nothing here is reachable from the network.
+PLATFORM_PORT=${PLATFORM_PORT}
+PLATFORM_HOST=127.0.0.1
+PLATFORM_DATA=${PLATFORM_DATA_DIR}
+PLATFORM_EMBED=auto
+OLLAMA_URL=http://${OLLAMA_HOST}
+EOF
+  run chmod 640 /etc/kinetic-ai.env
+
+  if [[ $SKIP_OLLAMA -eq 0 ]]; then
+    info "pulling the embedding model ${EMBED_MODEL} (274 MB) so embeddings stay local"
+    run ollama pull "$EMBED_MODEL"
+  fi
+
+  if [[ $SYSTEMD -eq 1 ]]; then
+    write_file /etc/systemd/system/kinetic-ai.service <<EOF
+[Unit]
+Description=KiNETiC-Ai — unified RAG + wiki data platform
+Documentation=https://github.com/${REPO}
+After=network-online.target ollama.service grid-os-sovereign.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
+WorkingDirectory=${APP_DIR}
+EnvironmentFile=/etc/kinetic-ai.env
+ExecStart=/usr/bin/env node platform/server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=${PLATFORM_DATA_DIR}
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    run systemctl daemon-reload
+    run systemctl enable --now kinetic-ai.service
+    run systemctl restart kinetic-ai.service || true
+    info "issue a key for the wiki:  node ${APP_DIR}/platform/server.mjs --create-key kinetic-wiki"
+  else
+    warn "no systemd — start manually:  cd ${APP_DIR} && PLATFORM_PORT=${PLATFORM_PORT} PLATFORM_HOST=127.0.0.1 PLATFORM_DATA=${PLATFORM_DATA_DIR} node platform/server.mjs"
+  fi
+else
+  info "platform not enabled (pass --platform) — /platform/* answers 503 with the command that starts it"
+fi
+if [[ $PLATFORM -eq 1 ]]; then
+  PLATFORM_SUMMARY="http://127.0.0.1:${PLATFORM_PORT} (loopback) — proxied at /platform/* · data in ${PLATFORM_DATA_DIR:-/var/lib/kinetic-ai}"
+else
+  PLATFORM_SUMMARY="not enabled — re-run with --platform"
 fi
 
 # ============================================================ 6 · edge
@@ -601,6 +686,7 @@ ${C_ACC}GRiD-OS-SOVEREIGN ${PKG_VERSION} installed${C_OFF}
   App files        ${APP_DIR}          (service user: ${SERVICE_USER})
   App env          /etc/grid-os-sovereign.env
   App service      systemctl status grid-os-sovereign
+  Platform         ${PLATFORM_SUMMARY}
   Model host       http://${OLLAMA_HOST}   (loopback — not published)
   Models           ${MODELS[*]}
   Edge             ${SITE_FILE}

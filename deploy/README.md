@@ -22,7 +22,17 @@ host. There is no build step, no database, no container registry to trust.
 bash deploy/local.sh                                  # real Ollama, small model
 bash deploy/local.sh --model qwen2.5:14b-instruct-q4_K_M
 bash deploy/local.sh --mock                           # no Ollama installed? demo host
+bash deploy/local.sh --platform                       # + the KiNETiC-Ai data tier (RAG, wiki)
+bash deploy/local.sh --mock --platform --fixtures     # + labelled sample content (npm run local:demo)
 ```
+
+`--platform` starts `platform/server.mjs` on `127.0.0.1:8090`, waits for its
+`/healthz`, points the app tier at it (`PLATFORM_URL`) and prints the command that
+issues a wiki key. `--platform-data` takes a relative path (resolved against the
+repo) or an absolute one, so state can live on a mounted volume instead of inside
+the checkout. `--fixtures` seeds six documents and five wiki pages through the real
+ingestion, wiki and retention paths — and every one of them is labelled as sample
+content in the store, in `/healthz` and in the wiki's own state panel.
 
 It checks node ≥ 18, installs Ollama if it is missing (macOS: Homebrew;
 Linux/WSL: the official installer), starts the model host on loopback, pulls the
@@ -109,6 +119,9 @@ Nine steps, all idempotent (re-run to upgrade in place):
 --gpu auto|cuda|rocm|cpu
 --source DIR|TARBALL|URL   where the app files come from
 --app-dir PATH --port N --repo OWNER/NAME --ref REF
+--platform               also run the KiNETiC-Ai data tier (RAG + wiki) on this host
+--platform-port N        platform port on loopback (default 8090)
+--embed-model NAME       embedding model to pull (default nomic-embed-text)
 --skip-ollama|--skip-app|--skip-nginx|--skip-firewall|--skip-verify
 --dry-run --render-only --out FILE -y/--yes
 ```
@@ -218,7 +231,7 @@ values — pass it as user-data to AWS/GCP/Azure/any provider, then point
 
 ```sh
 bash deploy/verify.sh --url https://llm.example.com --auth admin:pw \
-     --public-host 1.2.3.4 --expect-models --ssh ubuntu@1.2.3.4
+     --public-host 1.2.3.4 --expect-models --platform --ssh ubuntu@1.2.3.4
 ```
 
 It checks, and exits non-zero on any failure:
@@ -230,7 +243,8 @@ It checks, and exits non-zero on any failure:
 | streaming | completion accepted, TTFT < 3 s, ≥2 ndjson frames, `ttfb < total` (proves incremental, not buffered), `done:true`, runtime `eval_count` present |
 | transport | HSTS, `X-Content-Type-Options`, CSP, certificate issuer and days-to-expiry, HTTP→HTTPS redirect |
 | authentication | 401 without credentials, 200 with them, **and the gateway is behind auth too** |
-| exposure | `:11434` and `:8080` unreachable from outside (via `/dev/tcp`, no `nc` needed) |
+| exposure | `:11434`, `:8080` and `:8090` unreachable from outside (via `/dev/tcp`, no `nc` needed) |
+| data platform | `/platform/healthz` answers through the app origin with real capacity numbers; `/platform/v1/meta` is 401 without a key; `/wiki.html` is served; fixture content and the offline embedding fallback are reported as warnings. `--platform` turns "not enabled" (503) from a warning into a failure |
 | host (`--ssh`) | services active, ollama bound to loopback, env file mode 640, disk for weights, RAM, node version, GPU visible |
 
 `--json` emits the same result machine-readable for CI or a dashboard.
@@ -247,6 +261,57 @@ docker compose -f deploy/docker-compose.yml up -d
 GPU passthrough needs the NVIDIA Container Toolkit. The compose file
 deliberately does **not** publish Ollama's port — only the app tier is
 reachable, and it proxies `/gateway/*`.
+
+---
+
+## 6b · The KiNETiC-Ai data platform (RAG + wiki)
+
+The data tier is a separate loopback service. The app origin proxies
+`/platform/*` to it, so the browser only ever talks to one host.
+
+```sh
+# one host: app tier + platform + model host (+ a one-shot model pull)
+docker compose -f deploy/docker-compose.platform.yml up -d
+
+# add Postgres 16 + pgvector with platform/schema.sql applied on first boot
+docker compose -f deploy/docker-compose.platform.yml --profile pgvector up -d
+
+# or with systemd on a VPS
+sudo bash deploy/install.sh --domain ai.example.com --email ops@example.com \
+  --model qwen2.5:14b-instruct-q4_K_M --platform --auth admin:CHANGE_ME
+
+# issue a key (the secret is printed once; only its hash is stored)
+node platform/server.mjs --create-key kinetic-wiki
+
+# run it by hand
+node platform/server.mjs --port 8090 --host 127.0.0.1 --data-dir .data/platform
+PLATFORM_URL=http://127.0.0.1:8090 node server.js     # then open /wiki.html
+```
+
+`--platform` writes `/etc/kinetic-ai.env` and a hardened `kinetic-ai.service`
+(loopback only, `ProtectSystem=strict`, writable only in `/var/lib/kinetic-ai`),
+pulls the embedding model, and adds `PLATFORM_URL` to the app tier's environment.
+Without it, `/platform/*` answers **503 with the command that starts it**, and
+`wiki.html` shows that instead of inventing pages.
+
+Check it:
+
+```sh
+curl -s localhost:8090/healthz | head -c 400          # live GB vs the 20 GB ceiling
+curl -s localhost:8080/platform/healthz | head -c 200  # same, through the app origin
+nc -vz <host> 8090                                     # from outside: must FAIL
+```
+
+Sizing is in [docs/DATA-PLATFORM.md](../docs/DATA-PLATFORM.md): 50 GB per node
+volume, a 20 GB live ceiling, 22 GB of RAM for the index plus heap at full size,
+and 2.5× storage headroom against a 2× policy.
+
+**Honest status:** the reference server persists to JSONL on a volume, and that
+is what the tests and the demo run against. `platform/schema.sql` is the
+production Postgres + pgvector shape and the `pgvector` profile applies it, but
+the adapter that makes the server read and write those tables is the next piece
+of work — `DATABASE_URL` is set in the compose file and the platform does not use
+it yet.
 
 ---
 

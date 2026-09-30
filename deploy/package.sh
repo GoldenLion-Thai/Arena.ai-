@@ -42,17 +42,33 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$REPO_ROOT"
-[[ -f server.js && -f index.html && -f app.html && -f lab.html ]] || die "not a GRiD-OS-SOVEREIGN checkout"
+[[ -f server.js && -f index.html && -f app.html && -f lab.html && -f wiki.html && -f platform/server.mjs ]] \
+  || die "not a GRiD-OS-SOVEREIGN checkout (missing the app pages or the KiNETiC-Ai platform)"
 
 [[ -z $VERSION ]] && VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 DIRTY=$(git diff --quiet 2>/dev/null && echo "" || echo "-dirty")
-STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Byte-reproducibility must not depend on WHEN the build ran. Two hosts building
+# the same tree have to get the same checksum, so the stamped date is the source
+# date: SOURCE_DATE_EPOCH if the caller set it, else the commit time of HEAD, and
+# only if there is no git at all, "now".
+if [[ -n ${SOURCE_DATE_EPOCH:-} ]]; then
+  EPOCH="$SOURCE_DATE_EPOCH"
+else
+  EPOCH=$(git show -s --format=%ct HEAD 2>/dev/null || echo "")
+  [[ -z $EPOCH ]] && EPOCH=$(date -u +%s)
+fi
+STAMP=$(date -u -d "@${EPOCH}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+     || date -u -r "$EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+     || date -u +%Y-%m-%dT%H:%M:%SZ)
 ARTIFACT="${NAME}-${VERSION}-${SHA}${DIRTY}.tar.gz"
 
 # what ships: runtime surface + deployment automation (+ tests unless --no-tests)
-INCLUDE=(index.html app.html lab.html server.js package.json README.md DESIGN.md assets deploy)
+# what ships: the app pages, the KiNETiC-Ai data platform, the docs that state
+# what is and is not wired, and the deployment automation
+INCLUDE=(index.html app.html lab.html wiki.html server.js package.json README.md DESIGN.md assets platform docs deploy)
 [[ $INCLUDE_TESTS -eq 1 ]] && INCLUDE+=(tests)
 [[ -f .gitignore ]] && INCLUDE+=(.gitignore)
 [[ -d .github ]] && INCLUDE+=(.github)
@@ -81,7 +97,6 @@ done
 TARBALL="${OUT}/${ARTIFACT}"
 # Fixed owner/mtime + sorted entries make the build byte-reproducible for the
 # same tree, so two hosts can compare checksums instead of trusting a re-run.
-EPOCH=$(date -d "$STAMP" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$STAMP" +%s 2>/dev/null || echo 0)
 export SOURCE_DATE_EPOCH="$EPOCH"
 TAR_REPRO=(--sort=name --owner=0 --group=0 --numeric-owner --mtime="@${EPOCH}")
 tar --help 2>&1 | grep -q -- "--sort" || TAR_REPRO=(--owner=0 --group=0 --numeric-owner)  # bsdtar (macOS)
@@ -102,8 +117,9 @@ cat > "${OUT}/manifest.json" <<EOF
   "bytes": ${BYTES},
   "files": ${FILES},
   "built_at": "${STAMP}",
+  "source_date_epoch": ${EPOCH},
   "git": { "sha": "${SHA}", "branch": "${BRANCH}", "dirty": $([[ -n $DIRTY ]] && echo true || echo false) },
-  "contents": ["index.html", "app.html", "lab.html", "server.js", "assets/", "deploy/"$([[ $INCLUDE_TESTS -eq 1 ]] && echo ', "tests/"')],
+  "contents": ["index.html", "app.html", "lab.html", "wiki.html", "server.js", "assets/", "platform/", "docs/", "deploy/"$([[ $INCLUDE_TESTS -eq 1 ]] && echo ', "tests/"')],
   "runtime": { "node": ">=18", "dependencies": "none", "model_host": "ollama >= 0.3 or any OpenAI-compatible gateway" }
 }
 EOF

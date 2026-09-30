@@ -25,7 +25,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DEPLOY = join(ROOT, "deploy");
 const LOCAL_PORT = Number(process.env.DEPLOY_TEST_PORT || 8123);
 const LOCAL_OLLAMA_PORT = Number(process.env.DEPLOY_TEST_OLLAMA_PORT || 11599);
+const LOCAL_PLATFORM_PORT = Number(process.env.DEPLOY_TEST_PLATFORM_PORT || 8199);
 const LOCAL_URL = `http://127.0.0.1:${LOCAL_PORT}`;
+// Platform state lives in a temp dir, so a test run never writes into the repo.
+const PLATFORM_DATA = mkdtempSync(join(tmpdir(), "grid-platform-data-"));
 
 let passed = 0;
 let failed = 0;
@@ -197,15 +200,39 @@ ok("manifest records the git state", manifest.git && manifest.git.sha);
 ok("manifest declares zero runtime dependencies", manifest.runtime.dependencies === "none", manifest.runtime.dependencies);
 
 const entries = execFileSync("tar", ["-tzf", tarPath], { encoding: "utf8" }).trim().split("\n");
-for (const need of ["index.html", "app.html", "lab.html", "server.js", "assets/js/brand.js", "assets/js/gateway.js", "assets/css/grid-os.css", "deploy/install.sh", "deploy/verify.sh", "deploy/nginx.conf.tmpl"]) {
+for (const need of [
+  "index.html", "app.html", "lab.html", "wiki.html", "server.js",
+  "assets/js/brand.js", "assets/js/gateway.js", "assets/js/wiki.js", "assets/js/md.js", "assets/css/grid-os.css",
+  "platform/server.mjs", "platform/config.mjs", "platform/retrieve.mjs", "platform/lifecycle.mjs", "platform/wiki.mjs", "platform/schema.sql",
+  "docs/DATA-PLATFORM.md",
+  "deploy/install.sh", "deploy/verify.sh", "deploy/nginx.conf.tmpl", "deploy/docker-compose.platform.yml",
+]) {
   ok(`artifact ships ${need}`, entries.some((e) => e.endsWith("/" + need) || e === need));
 }
+ok("the manifest lists the data platform and the docs", manifest.contents.includes("platform/") && manifest.contents.includes("docs/") && manifest.contents.includes("wiki.html"), JSON.stringify(manifest.contents));
 ok("artifact excludes node_modules", !entries.some((e) => e.includes("node_modules")));
 ok("artifact excludes dist and .git", !entries.some((e) => /\/(dist|\.git)\//.test(e)));
 ok("artifact is small enough to email", statSync(tarPath).size < 3 * 1024 * 1024, `${(statSync(tarPath).size / 1024).toFixed(0)}KB`);
 
 const shaB = createHash("sha256").update(readFileSync(join(distB, execFileSync("ls", [distB], { encoding: "utf8" }).trim().split("\n").find((f) => f.endsWith(".tar.gz"))))).digest("hex");
 ok("build is byte-reproducible", actual === shaB, `${actual.slice(0, 12)} vs ${shaB.slice(0, 12)}`);
+
+/* Reproducibility must not depend on WHEN it ran: a build stamped from the wall
+   clock drifts across a second boundary and two hosts can never agree. */
+const distC = mkdtempSync(join(tmpdir(), "grid-dist-c-"));
+const distD = mkdtempSync(join(tmpdir(), "grid-dist-d-"));
+const fixedEnv = { ...process.env, SOURCE_DATE_EPOCH: "1700000000" };
+sh("bash", [join(DEPLOY, "package.sh"), "--out", distC], { env: fixedEnv });
+sh("bash", [join(DEPLOY, "package.sh"), "--out", distD], { env: fixedEnv });
+const tarOf = (d) => join(d, execFileSync("ls", [d], { encoding: "utf8" }).trim().split("\n").find((f) => f.endsWith(".tar.gz")));
+const shaC = createHash("sha256").update(readFileSync(tarOf(distC))).digest("hex");
+const shaD = createHash("sha256").update(readFileSync(tarOf(distD))).digest("hex");
+ok("SOURCE_DATE_EPOCH pins the build byte for byte", shaC === shaD, `${shaC.slice(0, 12)} vs ${shaD.slice(0, 12)}`);
+const manC = JSON.parse(readFileSync(join(distC, "manifest.json"), "utf8"));
+ok("the stamped date is the source date, not the wall clock", manC.built_at === "2023-11-14T22:13:20Z" && manC.source_date_epoch === 1700000000, `${manC.built_at} / ${manC.source_date_epoch}`);
+ok("a build without git stamps from HEAD, so it is still stable", /^\d{4}-\d{2}-\d{2}T/.test(manifest.built_at) && Number.isInteger(manifest.source_date_epoch), manifest.built_at);
+rmSync(distC, { recursive: true, force: true });
+rmSync(distD, { recursive: true, force: true });
 
 const installTxt = readFileSync(join(distA, "INSTALL.txt"), "utf8");
 ok("INSTALL.txt gives the scp command", /scp .*ubuntu@YOUR_HOST:\/tmp\//.test(installTxt));
@@ -219,6 +246,7 @@ section("local.sh — the fastest method, really executed");
 const local = spawn("bash", [
   join(DEPLOY, "local.sh"), "--mock", "--no-open",
   "--host", "127.0.0.1", "--port", String(LOCAL_PORT), "--ollama-port", String(LOCAL_OLLAMA_PORT),
+  "--platform", "--platform-port", String(LOCAL_PLATFORM_PORT), "--platform-data", PLATFORM_DATA, "--fixtures",
 ], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], detached: true });
 
 let localLog = "";
@@ -237,10 +265,32 @@ ok("local.sh reports the model host it used", new RegExp(`${LOCAL_OLLAMA_PORT}`)
 ok("local.sh prints the URLs to open", /\/app\.html/.test(localLog) && /\/lab\.html/.test(localLog));
 ok("local.sh binds loopback by default (privacy first)", /127\.0\.0\.1/.test(localLog) && !/0\.0\.0\.0/.test(localLog));
 
+/* --platform: the data tier comes up on loopback, the app tier is pointed at it,
+   and the script says out loud that fixture content is sample content. */
+ok("local.sh starts the data platform on the port it was given", /KiNETiC-Ai data platform/.test(localLog) && new RegExp(String(LOCAL_PLATFORM_PORT)).test(localLog), localLog.slice(-260));
+ok("local.sh reports the platform's own health numbers", /"liveGB"/.test(localLog) && /"ceilingGB":20/.test(localLog), (localLog.match(/platform: .*/) || [""])[0].slice(0, 160));
+ok("local.sh says fixture content is not a live corpus", /fixture content — sample documents, not a live corpus/i.test(localLog));
+ok("local.sh prints the command that issues a wiki key", /--create-key --app kinetic-wiki/.test(localLog));
+ok("local.sh points the app tier at the platform", /PLATFORM_URL/.test(read("deploy/local.sh")) && localLog.includes("/wiki.html"));
+
+const platHz = await fetchText(`http://127.0.0.1:${LOCAL_PLATFORM_PORT}/healthz`, 3000);
+ok("the platform answers on its own loopback port", platHz.status === 200 && /"ok":true/.test(platHz.body || ""), JSON.stringify(platHz).slice(0, 140));
+ok("the platform reports the fixtures it seeded", /"fixtureContent":true/.test(platHz.body || "") && /"documents":11/.test(platHz.body || ""), (platHz.body || "").slice(0, 220));
+
+const proxiedHz = await fetchText(`${LOCAL_URL}/platform/healthz`, 3000);
+ok("the app origin proxies /platform/* to the data tier", proxiedHz.status === 200 && /"platform":"KiNETiC-Ai"/.test(proxiedHz.body || ""), JSON.stringify(proxiedHz).slice(0, 160));
+const proxiedMeta = await fetchText(`${LOCAL_URL}/platform/v1/meta`, 3000);
+ok("a scoped platform route through the proxy demands a key", proxiedMeta.status === 401, `HTTP ${proxiedMeta.status}`);
+const wikiPage = await fetchText(`${LOCAL_URL}/wiki.html`, 3000);
+ok("the wiki page is served by the app tier", wikiPage.status === 200 && /wiki/i.test(wikiPage.body || ""), `HTTP ${wikiPage.status}`);
+const platformStateWritten = existsSync(join(PLATFORM_DATA, "documents.jsonl")) || existsSync(join(PLATFORM_DATA, "state.jsonl"));
+ok("the platform persisted its state outside the repo", platformStateWritten, PLATFORM_DATA);
+ok("no platform state was written into the checkout", !existsSync(join(ROOT, ".data")), ".data/ exists in the repo");
+
 // ============================================================ 5 · verifier
 section("verify.sh — run against the host local.sh just started");
 
-const v = sh("bash", [join(DEPLOY, "verify.sh"), "--url", LOCAL_URL, "--expect-models"]);
+const v = sh("bash", [join(DEPLOY, "verify.sh"), "--url", LOCAL_URL, "--expect-models", "--platform"]);
 ok("verify passes on a healthy host", v.code === 0, v.out.split("\n").filter((l) => l.includes("✗")).join(" | ").slice(0, 200));
 ok("verify counted its checks", /\d+ passed/.test(v.out), (v.out.match(/\d+ passed[^\n]*/) || [""])[0]);
 ok("verify proved discovery through the proxy", /discovery through the same-origin proxy/.test(v.out));
@@ -250,6 +300,15 @@ ok("verify checks runtime token accounting", /runtime token accounting/.test(v.o
 ok("verify warns about missing TLS on http", /TLS not checked/.test(v.out));
 ok("verify warns about missing auth", /no authentication/.test(v.out));
 ok("verify refuses to guess about public exposure on loopback", /public port exposure not tested/.test(v.out));
+
+ok("verify proves the data platform answers through the app origin", /the data platform answers through the app origin/.test(v.out), v.out.split("\n").filter((l) => /platform/i.test(l)).join(" | ").slice(0, 220));
+ok("verify reads the platform's real capacity numbers", /live [0-9.]+ GB of 20 GB/.test(v.out), (v.out.match(/live [^\n]*/) || [""])[0].slice(0, 120));
+ok("verify proves the platform API demands a key", /the API refuses a request with no key/.test(v.out));
+ok("verify flags fixture content instead of letting it pass as real", /the store holds fixture content/.test(v.out) && /not a live corpus/.test(v.out));
+ok("verify flags the offline embedding fallback", /embeddings are the offline fallback/.test(v.out) || /embedder (?!hash-embed-local)/.test(v.out), (v.out.match(/embedder[^\n]*/) || [""])[0].slice(0, 120));
+ok("verify checks the wiki page is served", /the wiki page is served/.test(v.out));
+ok("verify treats the data port as one that must stay closed", /for P in 11434 8080 8090/.test(read("deploy/verify.sh")));
+ok("verify only requires the platform when asked", /meh "the data platform is not enabled"/.test(read("deploy/verify.sh")) && /--platform\)     PLATFORM_EXPECT=1/.test(read("deploy/verify.sh")));
 
 const vjson = sh("bash", [join(DEPLOY, "verify.sh"), "--url", LOCAL_URL, "--json"]);
 let parsed = null;
@@ -406,6 +465,74 @@ ok("deploy/README documents Terraform", /terraform/i.test(dReadme));
 ok("deploy/README keeps the model port private", /11434/.test(dReadme) && /loopback|private|not public/i.test(dReadme));
 ok("root README points at the deployment layer", /deploy\/(install|local|package|verify)\.sh/.test(read("README.md")));
 ok("DESIGN.md covers automated deployment", /terraform|install\.sh/i.test(read("DESIGN.md")));
+
+// ================================================ 11 · KiNETiC-Ai data tier
+section("deploying the KiNETiC-Ai data platform");
+
+for (const flag of ["--platform", "--platform-port", "--embed-model"]) {
+  ok(`--help documents ${flag}`, help.out.includes(flag));
+}
+
+const platPlan = sh("bash", [join(DEPLOY, "install.sh"), "--dry-run", "--yes", "--platform", "--skip-nginx", "--skip-firewall", "--skip-verify"]);
+ok("the platform plan exits 0", platPlan.code === 0, platPlan.out.slice(-160));
+ok("the plan writes a platform env file", /write \/etc\/kinetic-ai\.env/.test(platPlan.out));
+ok("the platform binds loopback only", /PLATFORM_HOST=127\.0\.0\.1/.test(platPlan.out));
+ok("the platform env uses the names parseArgs() actually reads", /PLATFORM_PORT=8090/.test(platPlan.out) && /PLATFORM_DATA=\/var\/lib\/kinetic-ai/.test(platPlan.out) && /PLATFORM_EMBED=auto/.test(platPlan.out) && /OLLAMA_URL=http:\/\//.test(platPlan.out));
+ok("the platform unit runs platform/server.mjs as the service user", /ExecStart=\/usr\/bin\/env node platform\/server\.mjs/.test(platPlan.out) && /User=grid/.test(platPlan.out));
+ok("the platform unit is hardened and can only write its own data dir", /ProtectSystem=strict/.test(platPlan.out) && /ReadWritePaths=\/var\/lib\/kinetic-ai/.test(platPlan.out) && /NoNewPrivileges=true/.test(platPlan.out));
+ok("the platform starts after the model host", /After=network-online\.target ollama\.service/.test(platPlan.out));
+ok("the embedding model is pulled with the platform", /ollama pull nomic-embed-text/.test(platPlan.out));
+ok("the app tier is told where the platform lives", /PLATFORM_URL=http:\/\/127\.0\.0\.1:8090/.test(platPlan.out));
+ok("the summary reports the platform endpoint", /Platform\s+http:\/\/127\.0\.0\.1:8090/.test(platPlan.out));
+ok("the step count grows to include the platform", /\[10\/10\]/.test(platPlan.out) && !/\/9\]/.test(platPlan.out));
+ok("the plan tells the operator how to issue a key", /--create-key kinetic-wiki/.test(platPlan.out));
+
+const noPlat = sh("bash", [join(DEPLOY, "install.sh"), "--dry-run", "--yes", "--skip-nginx", "--skip-firewall", "--skip-verify"]);
+ok("without --platform nothing platform-shaped is written", !/kinetic-ai/.test(noPlat.out) && /PLATFORM_URL not set/.test(noPlat.out));
+ok("without --platform the step count stays at 9", /\[9\/9\]/.test(noPlat.out) && !/\/10\]/.test(noPlat.out));
+ok("without --platform the summary says so honestly", /Platform\s+not enabled/.test(noPlat.out));
+ok("--platform-port is honoured", sh("bash", [join(DEPLOY, "install.sh"), "--dry-run", "--yes", "--platform", "--platform-port", "9911", "--skip-nginx", "--skip-firewall", "--skip-verify"]).out.includes("PLATFORM_PORT=9911"));
+const embedPlan = sh("bash", [join(DEPLOY, "install.sh"), "--dry-run", "--yes", "--platform", "--embed-model", "bge-m3", "--skip-nginx", "--skip-firewall", "--skip-verify"]);
+ok("--embed-model changes the model that gets pulled", /ollama pull bge-m3/.test(embedPlan.out) && !/ollama pull nomic-embed-text/.test(embedPlan.out), (embedPlan.out.match(/ollama pull \S+/g) || []).join(","));
+
+const COMPOSE = "deploy/docker-compose.platform.yml";
+ok("the platform compose file is present", exists(COMPOSE));
+let cdoc = null;
+try { cdoc = yaml.load(read(COMPOSE)); } catch (e) { ok("the platform compose is valid YAML", false, e.message); }
+ok("the platform compose is valid YAML", !!cdoc);
+if (cdoc) {
+  const svc = cdoc.services || {};
+  const text = read(COMPOSE);
+  ok("it defines the app, platform, model host and pull job", ["grid-os", "platform", "ollama", "model-pull"].every((k) => svc[k]), Object.keys(svc).join(","));
+  ok("only the app tier publishes a port", Object.entries(svc).filter(([, v]) => (v.ports || []).length).map(([k]) => k).join(",") === "grid-os", Object.entries(svc).filter(([, v]) => (v.ports || []).length).map(([k]) => k).join(","));
+  ok("the app tier proxies /platform/* to the platform by DNS name", svc["grid-os"].environment.PLATFORM_URL === "http://platform:8090");
+  ok("the app tier waits for a healthy platform", svc["grid-os"].depends_on?.platform?.condition === "service_healthy");
+  ok("the store lives on a volume, not the read-only code mount", svc.platform.volumes.some((v) => String(v).endsWith("platform-data:/data")) && svc.platform.volumes.some((v) => String(v).endsWith(":ro")) && svc.platform.environment.PLATFORM_DATA === "/data", JSON.stringify(svc.platform.volumes));
+  ok("the platform healthcheck hits /healthz", JSON.stringify(svc.platform.healthcheck?.test || "").includes("/healthz"));
+  ok("the pull job fetches an embedding model, not just a chat model", /EMBED_MODEL/.test(svc["model-pull"].command.join(" ")) && /nomic-embed-text/.test(text));
+  ok("Postgres is behind a profile, so the default stack stays as it is", (svc.postgres.profiles || []).includes("pgvector"));
+  ok("the production schema is applied on first boot", (svc.postgres.volumes || []).some((v) => String(v).includes("platform/schema.sql") && String(v).includes("docker-entrypoint-initdb.d")));
+  ok("Postgres is tuned to the capacity plan", ["maintenance_work_mem=3GB", "max_connections=100", "hnsw.ef_search=100"].every((c) => svc.postgres.command.includes(c)), svc.postgres.command.filter((c) => /=/.test(c)).join(" "));
+  ok("Postgres is not published either", !svc.postgres.ports);
+  ok("the compose file is honest about what is not wired yet", /does not use it|next piece of work/i.test(text));
+  ok("the compose file states the same numbers as the capacity plan", /50 GB per node/.test(text) && /20 GB/.test(text) && /22 GB/.test(text));
+}
+
+ok("docs/DATA-PLATFORM.md documents the platform", exists("docs/DATA-PLATFORM.md"));
+if (exists("docs/DATA-PLATFORM.md")) {
+  const doc = read("docs/DATA-PLATFORM.md");
+  ok("the design doc states the capacity ceiling and per-node volume", /20\s*GB/.test(doc) && /50\s*GB/.test(doc));
+  ok("the design doc states the double-headroom rule as arithmetic", /2×|2x|double/i.test(doc) && /10,?226/.test(doc));
+  ok("the design doc states the 60-day rule and the way back in", /60[- ]day/i.test(doc) && /rehydrat/i.test(doc));
+  ok("the design doc states that the mirror is verified before anything is demoted", /verif/i.test(doc) && /never deletes the only copy|only copy/i.test(doc));
+  ok("the design doc names the verticals and their quotas", /legal/i.test(doc) && /compliance/i.test(doc) && /quota/i.test(doc));
+  ok("the design doc says what is NOT built yet", /not (yet )?(built|wired|implemented)|next piece of work|does not use it/i.test(doc));
+  ok("the design doc points at the tests that prove it", /tests\/platform\.mjs/.test(doc) && /npm test/.test(doc));
+}
+ok("deploy/README documents the platform tier", /--platform/.test(read("deploy/README.md")) && /docker-compose\.platform\.yml/.test(read("deploy/README.md")));
+ok("deploy/README no longer calls retrieval illustrative", !/RAG[^.]{0,60}illustrative/i.test(read("deploy/README.md")));
+ok("root README points at the data platform", /KiNETiC-Ai/.test(read("README.md")) && /platform\/server\.mjs|docs\/DATA-PLATFORM\.md/.test(read("README.md")));
+ok("DESIGN.md covers the data platform", /KiNETiC-Ai/.test(read("DESIGN.md")));
 
 // ------------------------------------------------------------------ teardown
 try { process.kill(-local.pid, "SIGTERM"); } catch { /* already gone */ }

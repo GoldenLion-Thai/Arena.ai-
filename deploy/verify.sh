@@ -29,6 +29,8 @@ JSON=0
 TIMEOUT=25
 MODEL=""
 PREFIX="/gateway/"
+PLATFORM_EXPECT=0
+PLATFORM_PREFIX="/platform/"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -42,7 +44,9 @@ while [[ $# -gt 0 ]]; do
     --prefix)       PREFIX="${2:-}"; shift 2 ;;
     --timeout)      TIMEOUT="${2:-}"; shift 2 ;;
     --json)         JSON=1; shift ;;
-    -h|--help)      sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --platform)     PLATFORM_EXPECT=1; shift ;;
+    --platform-prefix) PLATFORM_PREFIX="${2:-}"; shift 2 ;;
+    -h|--help)      awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) printf 'unknown flag: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
@@ -216,7 +220,7 @@ case "$PROBE_HOST" in 127.*|localhost|::1|"")
   meh "public port exposure not tested" "target is loopback — pass --public-host <ip> to test from outside"
   ;;
   *)
-  for P in 11434 8080; do
+  for P in 11434 8080 8090; do
     if timeout 6 bash -c "exec 3<>/dev/tcp/${PROBE_HOST}/${P}" 2>/dev/null; then
       bad "port ${P} is not reachable from outside" "OPEN — the model host or app tier is public. Close it (NSG/ufw) now."
       exec 3<&- 2>/dev/null || true
@@ -235,7 +239,47 @@ case "$PROBE_HOST" in 127.*|localhost|::1|"")
   ;;
 esac
 
-# ------------------------------------------------------------------ 7 · host (ssh)
+# ------------------------------------------------------------------ 7 · data platform
+sect "KiNETiC-Ai data platform (${PLATFORM_PREFIX})"
+
+PHZ=$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" ${AUTH:+-u "$AUTH"} "${URL}${PLATFORM_PREFIX}healthz" 2>/dev/null || true); PHZ="${PHZ:-000}"
+PBODY=$(curl -sS --max-time "$TIMEOUT" ${AUTH:+-u "$AUTH"} "${URL}${PLATFORM_PREFIX}healthz" 2>/dev/null || echo "")
+if [[ $PHZ == 200 ]] && printf '%s' "$PBODY" | grep -q '"ok":true'; then
+  ok "the data platform answers through the app origin" "$(printf '%s' "$PBODY" | head -c 200)"
+  LIVE=$(printf '%s' "$PBODY" | sed -n 's/.*"liveGB":\([0-9.eE+-]*\).*/\1/p')
+  CEIL=$(printf '%s' "$PBODY" | sed -n 's/.*"ceilingGB":\([0-9.eE+-]*\).*/\1/p')
+  DOCS=$(printf '%s' "$PBODY" | sed -n 's/.*"documents":\([0-9]*\).*/\1/p')
+  EMB=$(printf '%s' "$PBODY" | sed -n 's/.*"embedder":"\([^"]*\)".*/\1/p')
+  if [[ -n $LIVE && -n $CEIL ]]; then
+    ok "it reports live usage against the ceiling, not a placeholder" "live ${LIVE} GB of ${CEIL} GB · ${DOCS:-?} documents · embedder ${EMB:-?}"
+  else
+    bad "it reports live usage against the ceiling" "$(printf '%s' "$PBODY" | head -c 160)"
+  fi
+  [[ $EMB == hash-embed-local ]] && meh "embeddings are the offline fallback" "hash-embed-local is deterministic but not semantic — point the platform at Ollama and pull ${EMB_MODEL_HINT:-nomic-embed-text}"
+
+  MC=$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" ${AUTH:+-u "$AUTH"} "${URL}${PLATFORM_PREFIX}v1/meta" 2>/dev/null || true); MC="${MC:-000}"
+  [[ $MC == 401 ]] && ok "the API refuses a request with no key" "HTTP 401 on ${PLATFORM_PREFIX}v1/meta" \
+                   || bad "the API refuses a request with no key" "HTTP ${MC} — scoped routes must require a key"
+
+  if printf '%s' "$PBODY" | grep -q '"fixtureContent":true'; then
+    meh "the store holds fixture content" "seeded with --fixtures: sample documents, not a live corpus"
+  else
+    ok "the store holds no fixture content" "everything in it was ingested for real"
+  fi
+elif [[ $PHZ == 503 ]]; then
+  if [[ $PLATFORM_EXPECT == 1 ]]; then
+    bad "the data platform is live" "HTTP 503 — start it: node platform/server.mjs --data-dir /var/lib/kinetic-ai (or install.sh --platform)"
+  else
+    meh "the data platform is not enabled" "the app origin answers 503 with the command that starts it — pass --platform to require it"
+  fi
+else
+  bad "the data platform answers through the app origin" "HTTP ${PHZ}"
+fi
+
+WIKI=$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" ${AUTH:+-u "$AUTH"} "${URL}/wiki.html" 2>/dev/null || true); WIKI="${WIKI:-000}"
+[[ $WIKI == 200 || $WIKI == 401 ]] && ok "the wiki page is served" "HTTP ${WIKI} on /wiki.html" || bad "the wiki page is served" "HTTP ${WIKI}"
+
+# ------------------------------------------------------------------ 8 · host (ssh)
 if [[ -n $SSH_HOST ]]; then
   sect "host state (ssh ${SSH_HOST})"
   rsh() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" "$@" 2>/dev/null; }

@@ -438,6 +438,13 @@ Everything below the reverse proxy is provisioned by `deploy/install.sh` (an exi
 VaultLLM, Blackbox Private AI, IntraMind, PrivateStack, ClosedCircuit AI, QuietCompute, Northstar
 Private AI.
 
+`KiNETiC-Ai` is the **platform** brand — the shared data tier (RAG, wiki, retention, mirror) that every
+app and every business vertical consumes. It is one constant, `PLATFORM.name` in `platform/config.mjs`,
+and it appears in API responses, the wiki UI and the schema. Keeping the two brands separate is
+deliberate: the product is what a customer operates, the platform is what the business shares. If
+KiNETiC-Ai is ever meant to become the master brand, that is a one-line change plus the `TITLES` map in
+`brand.js` — not a refactor.
+
 The name carries two claims and must carry both honestly:
 
 - **GRiD-OS** — this is infrastructure you operate, not a service you rent. An operating-system
@@ -515,9 +522,9 @@ and the naming rationale are in §12.
 
 ## 15. What the test suite verifies
 
-`npm test` runs three suites: two in jsdom with a real IndexedDB and WebCrypto shim, driving the
-actual UI rather than unit-testing helpers, and one that treats the deployment layer as code.
-378 assertions:
+`npm test` runs four suites: two in jsdom with a real IndexedDB and WebCrypto shim, driving the
+actual UI rather than unit-testing helpers, one that exercises the data platform end to end, and one
+that treats the deployment layer as code. 859 assertions:
 
 | Area | Asserted behaviour |
 | --- | --- |
@@ -532,7 +539,9 @@ actual UI rather than unit-testing helpers, and one that treats the deployment l
 | Lab | 4 tabs, 2 variants, ≥18 metrics, samples + rationale for permitted sets, 7-criterion rubric, disallowed tab withholds raw samples, **96% refusal coloured good not bad**, re-run updates a second-precise timestamp |
 | Brand | Wordmark/title/meta/favicon/mark injected; patching `NAME` alone renames every page with no stale text left |
 | Gateway | Proxy streams incrementally with `X-Accel-Buffering: no`; 502 explains the fix; probe discovers and injects models; endpoint marker proves real serving; eval stats become the metrics; TTFT from request start; SSE `usage` honoured; dead endpoint surfaces in the transcript; demo mode works offline |
-| Deployment | Scripts executable and syntax-clean; the installer's dry-run covers nine steps and changes nothing; `--render-only` correct in TLS and plain modes (tokens gone, buffering off, 600 s timeout, auth + allowlist injected, ACME path open); artifact checksummed, content-complete and byte-reproducible; `local.sh` really started and really serving; `verify.sh` passes on a live host, fails with exit 1 on a dead one, and emits valid JSON; Makefile forwards its variables; cloud-init parses and holds the 0600 env file, network wait and volume mount; Terraform opens no ingress on 11434/8080 and marks the password sensitive; both workflows parse, run their gates, and never use `secrets` in an `if:` |
+| Platform | Capacity arithmetic (10,226 B/chunk, 1,785,019 chunks, 22 GB RAM, 2.5× storage headroom, quotas summing to exactly 20 GB); embeddings deterministic, normalised and semantically ordered; chunking keeps identifiers whole; admission refuses drafts, personal files, duplicates, stale and over-quota content with reasons; hybrid retrieval ranks 3/3 exact identifiers correctly and cites a page only when the source gave one; ACLs applied in the candidate query with no existence leaks; the 60-day rule demotes only after the mirror verifies, keeps a discoverable stub, reports drift on rehydration, and is reset by opening but not by retrieval; wiki revisions immutable, backlinks bidirectional, reviews surfaced, pages indexed and mirrored out; the HTTP API authenticates hashed keys, enforces scopes, verticals and rate limits, and audits every write; JSONL state survives a restart; `/platform/*` is reachable on the app origin; `schema.sql` agrees with the code on every constant, grant, policy and invariant |
+| Wiki UI | Renders nothing invented when the platform is down (and shows the command that fixes it); a 503 reads the same as offline; health facts without a key but no content; a refused key is reported with the platform's own reason; the key lives in `sessionStorage` and never `localStorage`; pages, verticals, reviews, quota bars, capacity gauge, retention and mirror panels all render from the API; Markdown bodies get document-scale headings; `[[wikilinks]]` navigate without dirtying the URL hash; history lists revisions with note, author and hash and diffs two of them; saving PUTs body/note/author and creates the next revision; creating POSTs title/vertical/body and opens the new page; search shows scores and snippets; "ask the index" shows citations with tier, checksum and source, surfaces archived matches with the reason and the way back in, and reports retrieval metrics against the 350 ms budget; a read-only key is not offered write actions and sees only its own vertical; forgetting the key returns to the honest no-key state |
+| Deployment | Scripts executable and syntax-clean; the installer's dry-run covers nine steps (ten with `--platform`) and changes nothing; `--render-only` correct in TLS and plain modes (tokens gone, buffering off, 600 s timeout, auth + allowlist injected, ACME path open); artifact checksummed, content-complete and byte-reproducible; `local.sh` really started and really serving; `verify.sh` passes on a live host, fails with exit 1 on a dead one, and emits valid JSON; Makefile forwards its variables; cloud-init parses and holds the 0600 env file, network wait and volume mount; Terraform opens no ingress on 11434/8080 and marks the password sensitive; both workflows parse, run their gates, and never use `secrets` in an `if:` |
 
 ## 16. Automated deployment
 
@@ -591,3 +600,58 @@ Before publishing any of this externally, verify each claim against the deployed
 - [ ] The page itself ships no trackers, analytics or third-party beacons.
 - [ ] `deploy/verify.sh` passes against the production host, including `--public-host` exposure
       checks and `--ssh` host-state checks, and its output is kept with the change record.
+
+## 18. The data platform (KiNETiC-Ai)
+
+`docs/DATA-PLATFORM.md` is the design document; `platform/` is the implementation; this section is
+about how the platform is allowed to *look and speak* in the UI.
+
+**Layout.** `wiki.html` is three columns on wide screens — filters and state, the page, the honest
+numbers — collapsing to one column below 1180 px. The right rail is not decoration: capacity, retention
+and mirror state are the three things an operator needs while reading, and they are the numbers the
+platform actually reports, never placeholders.
+
+**Tokens.** The wiki reuses the Midnight Vault palette and the existing type scale. Two additions:
+`.wiki__state[data-state]` colours the connection line with the semantic tokens (`--verified`,
+`--warning`, `--danger`, `--action`) rather than inventing new ones, and `.wiki__gauge span[data-tone]`
+turns amber at 90% of the ceiling and red at 97% — the same thresholds that tighten the retention
+window, so the colour and the policy cannot disagree.
+
+**Document-scale Markdown.** `md.js` clamps headings to `h4`–`h6` because a chat bubble should not
+shout. A wiki page is a document, so it asks for `render(body, { documentHeadings: true, links: true })`:
+`#` becomes `h1`, and `[text](href)`, `[[slug]]` and a bare `/wiki/slug` become anchors. Links are
+opt-in and scheme-allowlisted (`http(s)`, `mailto`, root-relative, `wiki:`) — everything else stays
+literal text, so a pasted `javascript:` URL is inert. Internal wiki links carry `data-slug` and are
+handled by the delegated click handler with `preventDefault()`, so navigation never dirties the URL hash.
+
+**Citations look like evidence.** Each citation is a card with a mono head line (`[1] Title — heading
+(p.12) [legal]`), the quoted excerpt, the checksum and a link to the source. A cold citation gets an
+amber left border and appears in a separate dashed box headed *Archived, still discoverable*, with the
+reason and the way back in. The rule from the retrieval layer carries into the pixels: **a page number
+appears only when the source supplied one**, and nothing is silently omitted.
+
+**Sample content says it is sample content.** `--fixtures` seeds six documents and five wiki pages so a
+demo is not an empty room. It seeds through the real paths — `ingest()` for admission, `createPage()`
+for the wiki, and `sweep()` for the cold tier, with the source items placed in SharePoint first so the
+mirror verification is genuine — and everything it creates is labelled: `sourceKind: "fixture"`, a
+`fixture` tag, a `/fixtures/` path, and `fixtureContent: true` on every health check, which the wiki
+prints in its state panel as *fixture — sample documents seeded with --fixtures, not a live corpus*.
+`verify.sh` reports the same as a warning rather than a pass.
+
+**Numbers are reported, not rounded into confidence.** The gauge prints `1.5 MB live of 20 GB ceiling
+(0.008%)` rather than `0.0 GB`, because rounding a small pilot store to zero decimals once disabled a
+ceiling check in the code as well. Quota rows show the window *in force* (`30d (of 60d)`) next to the
+policy default, so an operator can see pressure rather than infer it.
+
+**Empty and offline states carry instructions.** No platform: the exact command to start it, plus what
+the wiki is. No key: health facts (public) and nothing else. Refused key: the platform's own reason.
+Read-only key: no write buttons, no admin figures, and a line saying which scope is missing. A UI that
+shows sample content while the backend is down teaches people to distrust the real thing.
+
+**Secrets.** The API key is a bearer secret: `sessionStorage` only, cleared by *Forget key*, never
+written to `localStorage`, never logged, and the platform stores only its SHA-256 hash. The author name
+— not a secret — is the only thing persisted between visits.
+
+**Naming in copy.** The platform speaks in the same voice as the product: plain sentences, no
+superlatives, and the limitation stated next to the capability. "Mirrored to SharePoint" not
+"seamlessly synced". "Would archive 1 document (nothing changed)" not "optimised storage".

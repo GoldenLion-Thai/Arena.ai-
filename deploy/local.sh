@@ -5,6 +5,16 @@
 #   bash deploy/local.sh                          # real Ollama, small model
 #   bash deploy/local.sh --model qwen2.5:14b-instruct-q4_K_M
 #   bash deploy/local.sh --mock                   # no Ollama, no download: demo host
+#   bash deploy/local.sh --platform               # + the KiNETiC-Ai data tier (RAG, wiki)
+#   bash deploy/local.sh --platform --fixtures    # + sample content, labelled as sample
+#
+# Flags: --model --port --host --ollama-port --keep-alive --mock --no-open
+#        --skip-pull --no-install --platform --platform-port --platform-data
+#        --fixtures
+#
+# --platform starts platform/server.mjs on 127.0.0.1:8090 (loopback only), points
+# the app tier at it, and makes /wiki.html live. Issue a key with the command it
+# prints; the wiki will not invent pages without one.
 #
 # One command: makes sure node and Ollama exist, starts the model host, pulls a
 # model, launches the app on http://localhost:8080 and opens your browser.
@@ -23,6 +33,10 @@ HOST="127.0.0.1"          # loopback by default; --host 0.0.0.0 inside a contain
 OLLAMA_PORT="11434"
 KEEP_ALIVE="30m"
 MOCK=0
+PLATFORM=0
+PLATFORM_PORT="8090"
+PLATFORM_DATA=".data/platform"
+FIXTURES=0
 NO_OPEN=0
 SKIP_PULL=0
 NO_INSTALL=0
@@ -42,10 +56,14 @@ while [[ $# -gt 0 ]]; do
     --ollama-port) OLLAMA_PORT="${2:-}"; shift 2 ;;
     --keep-alive) KEEP_ALIVE="${2:-}"; shift 2 ;;
     --mock)       MOCK=1; shift ;;
+    --platform)   PLATFORM=1; shift ;;
+    --platform-port) PLATFORM_PORT="${2:-}"; shift 2 ;;
+    --platform-data) PLATFORM_DATA="${2:-}"; shift 2 ;;
+    --fixtures)   FIXTURES=1; PLATFORM=1; shift ;;
     --no-open)    NO_OPEN=1; shift ;;
     --skip-pull)  SKIP_PULL=1; shift ;;
     --no-install) NO_INSTALL=1; shift ;;
-    -h|--help)    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
     *)            die "unknown flag: $1" ;;
   esac
 done
@@ -136,10 +154,38 @@ else
   fi
 fi
 
-# ------------------------------------------------------------------- 4 · app
+# ------------------------------------------------------- 4 · data platform
+PLATFORM_URL=""
+if [[ $PLATFORM -eq 1 ]]; then
+  [[ -f "${REPO_ROOT}/platform/server.mjs" ]] || die "--platform needs platform/server.mjs in ${REPO_ROOT}"
+  # --platform-data is relative to the repo unless it is already absolute, so a
+  # caller can put state on a mounted volume instead of inside the checkout.
+  case "$PLATFORM_DATA" in
+    /*) PLATFORM_DATA_DIR="$PLATFORM_DATA" ;;
+    *)  PLATFORM_DATA_DIR="${REPO_ROOT}/${PLATFORM_DATA}" ;;
+  esac
+  mkdir -p "$PLATFORM_DATA_DIR" || die "cannot create the platform data dir: ${PLATFORM_DATA_DIR}"
+  info "starting the KiNETiC-Ai data platform on 127.0.0.1:${PLATFORM_PORT} → embeddings http://127.0.0.1:${OLLAMA_PORT}"
+  PLAT_ARGS=(--port "$PLATFORM_PORT" --host 127.0.0.1 --data-dir "$PLATFORM_DATA_DIR" --ollama "http://127.0.0.1:${OLLAMA_PORT}")
+  [[ $FIXTURES -eq 1 ]] && PLAT_ARGS+=(--fixtures)
+  ( cd "$REPO_ROOT" && node platform/server.mjs "${PLAT_ARGS[@]}" ) &
+  PIDS+=($!)
+  for _ in $(seq 1 30); do
+    curl -fsS --max-time 1 "http://127.0.0.1:${PLATFORM_PORT}/healthz" >/dev/null 2>&1 && break
+    sleep 0.5
+  done
+  curl -fsS --max-time 2 "http://127.0.0.1:${PLATFORM_PORT}/healthz" >/dev/null 2>&1 \
+    || die "the data platform did not come up on 127.0.0.1:${PLATFORM_PORT} (it binds loopback only)"
+  PLATFORM_URL="http://127.0.0.1:${PLATFORM_PORT}"
+  good "platform: $(curl -fsS "${PLATFORM_URL}/healthz" | head -c 220)"
+  [[ $FIXTURES -eq 1 ]] && warn "seeded fixture content — sample documents, not a live corpus"
+  info "issue a key:  (cd ${REPO_ROOT} && node platform/server.mjs --create-key --app kinetic-wiki --scopes search,read,wiki --data-dir ${PLATFORM_DATA_DIR})"
+fi
+
+# ------------------------------------------------------------------- 5 · app
 info "starting the app tier on ${HOST}:${PORT} → gateway http://127.0.0.1:${OLLAMA_PORT}"
 OLLAMA_URL="http://127.0.0.1:${OLLAMA_PORT}" PORT="$PORT" HOST="$HOST" GATEWAY_PREFIX="/gateway/" \
-  node server.js &
+  PLATFORM_URL="$PLATFORM_URL" node server.js &
 PIDS+=($!)
 
 URL="http://${HOST}:${PORT}"
@@ -150,7 +196,7 @@ done
 curl -fsS --max-time 2 "${URL}/healthz" >/dev/null 2>&1 || die "app did not come up on ${URL}"
 good "healthz: $(curl -fsS "${URL}/healthz")"
 
-# ------------------------------------------------------------------- 5 · open
+# ------------------------------------------------------------------- 6 · open
 if [[ $NO_OPEN -eq 0 ]]; then
   case "$OS" in
     Darwin) open "$URL" 2>/dev/null || true ;;
@@ -166,6 +212,7 @@ ${A}Ready${O}
   Workspace      ${URL}/app.html
   Landing        ${URL}/
   Behaviour Lab  ${URL}/lab.html
+  Wiki           ${URL}/wiki.html$([[ -n $PLATFORM_URL ]] && echo "  ${D}(data platform on ${PLATFORM_URL})${O}" || echo "  ${Y}— start with --platform${O}")
   Gateway        ${URL}/gateway/api/tags
   Model          ${MODEL}
   Keep-alive     ${KEEP_ALIVE}  ${D}(first request after idle pays a ~1–4s reload)${O}

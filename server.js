@@ -5,6 +5,9 @@
    Static:  node server.js                       → http://localhost:8080
    Proxy:   OLLAMA_URL=http://10.0.0.12:11434 node server.js
             → /gateway/* is forwarded to that host, streaming intact.
+   Platform: PLATFORM_URL=http://127.0.0.1:8090 node server.js
+            → /platform/* is forwarded to the KiNETiC-Ai API (RAG + wiki),
+              so every app shares one origin, one cookie scope and no CORS.
 
    Why the proxy exists: a browser cannot reach a private subnet, and Ollama
    refuses cross-origin requests unless OLLAMA_ORIGINS allows them. Serving both
@@ -23,6 +26,10 @@ const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || "0.0.0.0";
 const PREFIX = process.env.GATEWAY_PREFIX || "/gateway/";
 const TARGET = process.env.OLLAMA_URL || process.env.GATEWAY_URL || "http://127.0.0.1:11434";
+// KiNETiC-Ai platform API (RAG + wiki shared by every app). Optional: when
+// unset, /platform/* returns a 503 that says how to start it.
+const PLATFORM_PREFIX = process.env.PLATFORM_PREFIX || "/platform/";
+const PLATFORM_TARGET = process.env.PLATFORM_URL || "";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -76,17 +83,27 @@ function serveStatic(req, res) {
 
 /* ------------------------------------------------------------------- proxy */
 
-function proxy(req, res) {
+/**
+ * Single-target forwarding proxy. Not an open proxy: the target is fixed by
+ * configuration and the path prefix is stripped, nothing else is rewritten.
+ * Streaming is preserved (pipe, no buffering, X-Accel-Buffering: no).
+ */
+function proxy(req, res, opts = {}) {
+  const TARGET_URL = opts.target || TARGET;
+  const prefix = opts.prefix || PREFIX;
+  const label = opts.label || "Gateway";
+  const hint = opts.hint || `  • start Ollama there, or set OLLAMA_URL to the right host\n  • on the Ollama box: OLLAMA_HOST=127.0.0.1:11434 (keep it private)\n  • in a VPC: check the security list / NSG allows this host on that port\n`;
+
   let target;
   try {
-    target = new URL(TARGET);
+    target = new URL(TARGET_URL);
   } catch {
-    res.writeHead(500, { "Content-Type": "text/plain" }).end("Bad OLLAMA_URL");
+    res.writeHead(500, { "Content-Type": "text/plain" }).end(`Bad ${opts.envName || "OLLAMA_URL"}`);
     return;
   }
 
   // /gateway/api/chat  →  {target}/api/chat
-  const rest = req.url.slice(PREFIX.length - 1); // keep the leading slash
+  const rest = req.url.slice(prefix.length - 1); // keep the leading slash
   const upstreamPath = (target.pathname.replace(/\/$/, "") + rest) || "/";
 
   const lib = target.protocol === "https:" ? https : http;
@@ -120,11 +137,8 @@ function proxy(req, res) {
   );
 
   upstream.on("error", (e) => {
-    const msg = `Gateway proxy could not reach ${TARGET}${upstreamPath}: ${e.code || e.message}\n\n` +
-      `Fix one of:\n` +
-      `  • start Ollama there, or set OLLAMA_URL to the right host\n` +
-      `  • on the Ollama box: OLLAMA_HOST=127.0.0.1:11434 (keep it private)\n` +
-      `  • in a VPC: check the security list / NSG allows this host on that port\n`;
+    const msg = `${label} proxy could not reach ${TARGET_URL}${upstreamPath}: ${e.code || e.message}\n\n` +
+      `Fix one of:\n${hint}`;
     if (!res.headersSent) res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(msg);
   });
@@ -136,15 +150,38 @@ function proxy(req, res) {
 
 const server = http.createServer((req, res) => {
   if (req.url === PREFIX || req.url.startsWith(PREFIX)) return proxy(req, res);
+
+  // KiNETiC-Ai: the shared RAG + wiki API, on the same origin as the UI.
+  if (req.url === PLATFORM_PREFIX || req.url.startsWith(PLATFORM_PREFIX)) {
+    if (!PLATFORM_TARGET) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({
+        error: "platform not configured",
+        detail: "start it with: node platform/server.mjs --port 8090 --data-dir .data/platform",
+        then: "and run this server with PLATFORM_URL=http://127.0.0.1:8090",
+      }));
+    }
+    return proxy(req, res, {
+      target: PLATFORM_TARGET,
+      prefix: PLATFORM_PREFIX,
+      label: "KiNETiC-Ai platform",
+      envName: "PLATFORM_URL",
+      hint: "  • node platform/server.mjs --port 8090 --data-dir .data/platform\n  • then PLATFORM_URL=http://127.0.0.1:8090 node server.js\n  • see docs/DATA-PLATFORM.md for the shared data platform\n",
+    });
+  }
+
   if (req.url === "/healthz") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, gateway: TARGET, prefix: PREFIX }));
+    return res.end(JSON.stringify({ ok: true, gateway: TARGET, prefix: PREFIX, platform: PLATFORM_TARGET || null, platformPrefix: PLATFORM_PREFIX }));
   }
   serveStatic(req, res);
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`GRiD-OS-SOVEREIGN → http://${HOST}:${PORT}  (root ${ROOT})`);
+  const bound = server.address()?.port || PORT;   // PORT=0 means "any free port"
+  console.log(`GRiD-OS-SOVEREIGN → http://${HOST}:${bound}  (root ${ROOT})`);
   console.log(`Gateway   → ${PREFIX}* proxied to ${TARGET}`);
   console.log(`            set OLLAMA_URL to point at your Ollama/vLLM host`);
+  console.log(`Platform  → ${PLATFORM_PREFIX}* ${PLATFORM_TARGET ? `proxied to ${PLATFORM_TARGET}` : "not configured (set PLATFORM_URL)"}`);
+  console.log(`            KiNETiC-Ai: node platform/server.mjs --port 8090 --data-dir .data/platform`);
 });

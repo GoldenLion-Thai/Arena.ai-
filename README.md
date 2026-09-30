@@ -20,6 +20,9 @@ python3 -m http.server 8080 --bind 0.0.0.0
 | [`index.html`](index.html) | Landing narrative: hero terminal, trust strip, features, four-step flow, architecture diagram, open-weight shortlist, **live theme switcher** across three palettes, copy system, pre-launch honesty note |
 | [`app.html`](app.html) | The working workspace: streaming chat, encrypted local history, model picker with data-handling metadata, privacy-state panel, slash commands, `@`-knowledge, file indexing, gateway settings |
 | [`lab.html`](lab.html) | Behaviour Lab: standard vs refusal-reduced ("abliterated") profile side by side, per prompt-set tabs, blind tone rubric, length distribution, metric definitions |
+| [`wiki.html`](wiki.html) | The **KiNETiC-Ai wiki**: page list by vertical, Markdown view with `[[wikilinks]]` and backlinks, immutable revision history with diffs, review queue, hybrid search with citations, and live capacity/retention/mirror panels — all read from the platform over the same origin, and rendering *nothing* invented when the platform is down |
+| [`platform/`](platform/) | The unified data platform: policy and capacity maths, embeddings, store, ingestion and admission, hybrid retrieval with citations, SharePoint mirror, retention lifecycle, wiki, HTTP API, and the production `schema.sql` |
+| [`docs/DATA-PLATFORM.md`](docs/DATA-PLATFORM.md) | The data platform design: capacity arithmetic, admission policy, retrieval and citation contract, the 60-day rule, permissions, API surface, production schema, and what is not wired yet |
 | [`DESIGN.md`](DESIGN.md) | The design guide: principles, layout blueprint, tokens, storage model, picker UX, streaming rules, benchmark method, claim audit |
 | [`deploy/`](deploy/) | Deployment automation: `install.sh` (VPS installer), `local.sh` (one-command local run), `package.sh` (reproducible artifact), `verify.sh` (post-deploy proof), `Makefile`, nginx template, Ollama systemd drop-in, docker-compose, cloud-init, hardening checklist |
 | [`oci/terraform/`](oci/terraform/) | Fully automated infrastructure on Oracle Cloud: VCN, NSG (22/80/443 only), GPU or A1 Flex instance, separate model-weight volume, cloud-init that installs and verifies the product |
@@ -39,7 +42,20 @@ app.html   ──▶ assets/js/app.js         workspace controller
               ├─ engine.js               on-device demo responder (offline default)
               └─ md.js                   escape-first markdown renderer for streamed output
 lab.html   ──▶ assets/js/lab.js         DATASETS per prompt set × variant, metrics, rubric, samples
-server.js                               static server + same-origin /gateway/* streaming proxy
+wiki.html  ──▶ assets/js/wiki.js        the KiNETiC-Ai wiki UI: pages, revisions, reviews, citations,
+              └─ md.js (document mode)   capacity — same-origin /platform/* only, nothing faked offline
+server.js                               static server + same-origin /gateway/* and /platform/* proxies
+
+platform/server.mjs                     HTTP API: keys, scopes, verticals, rate limits, audit
+  ├─ config.mjs                         STORAGE · VERTICALS · TIERS · ADMISSION · APPS · capacityPlan()
+  ├─ embeddings.mjs                     Ollama embedder (768d) + deterministic local fallback
+  ├─ store.mjs                          documents · chunks · vectors · wiki · audit · keys · JSONL persistence
+  ├─ ingest.mjs                         parse → chunk → admission → embed → index (dedupe by content hash)
+  ├─ retrieve.mjs                       dense + BM25 → RRF → diversity → citations → context block
+  ├─ sharepoint.mjs                     delta sync in, mirror out, permission mapping, mirror verification
+  ├─ lifecycle.mjs                      60-day demotion · rehydration · sweeps · ceiling · quota reports
+  ├─ wiki.mjs                           pages · immutable revisions · links · reviews · diff · mirror
+  └─ schema.sql                         production Postgres 16 + pgvector: HNSW, RLS, retention views
 ```
 
 Everything is plain ES5-compatible browser JS loaded with `<script>` tags, so it runs from `file://`,
@@ -73,6 +89,54 @@ a static host, or an nginx/OCI bucket with no toolchain.
 
 > For Ollama: set `OLLAMA_ORIGINS` to include the origin serving this page, and remember the browser
 > must reach the host — a sandboxed browser cannot talk to `localhost` inside the sandbox.
+
+## The data platform (KiNETiC-Ai)
+
+One knowledge substrate shared by every app and every business vertical — the thing that makes
+retrieval real instead of illustrative.
+
+- **Capacity is arithmetic.** 50 GB per node volume, a **20 GB live ceiling**, 10,226 planning bytes
+  per chunk ⇒ **1,785,019 chunks ≈ 714 M tokens**. HNSW index 7.05 GB + heap 9.95 GB ⇒ **22 GB RAM**
+  under a **2× headroom policy** (storage comes out at 2.5×). `capacityPlan()` computes it,
+  `tests/platform.mjs` asserts it, and `platform/schema.sql` carries the same constants — a test
+  parses the SQL to prove the two agree.
+- **Only live, production, useful data.** Drafts, templates, personal files, training corpora,
+  duplicates, 7-year-old content, sub-40-token documents and over-quota ingests are refused with
+  reasons, and every refusal is audited.
+- **Hybrid retrieval with honest citations.** Dense (HNSW, 768d) + BM25 fused with RRF, diversified
+  per document. Citations state a page **only if the source gave one**, carry a checksum and the
+  SharePoint link, and mark restricted content. 3/3 exact identifiers (`clause 14.2`,
+  `FCA-2024-118`) rank the right document first in the fixtures.
+- **Authorisation is in the candidate query, never a post-filter** — in `scanChunks()` and in
+  Postgres RLS. Default deny; permissions inherit from SharePoint and never widen; an out-of-scope
+  vertical returns an empty scope rather than a 403, so nothing leaks about what exists.
+- **The 60-day rule.** Content nobody *opens* for 60 days goes back to SharePoint, keeping a
+  4.3 KB discoverable stub — and demotion only happens after the mirror is verified, so the platform
+  never deletes the only copy. Retrieval does not reset the clock; opening does. The path reopens on
+  demand, pulling from SharePoint and reporting drift if the source changed. Under quota pressure the
+  window adapts 60 → 30 → 14 days.
+- **A real wiki.** Vertical-scoped slugs, immutable revisions with diffs, `[[wikilinks]]` and
+  backlinks in both directions, review dates with an overdue queue, and every page indexed into RAG so
+  it is citable beside a contract — then mirrored back out to SharePoint.
+- **One API, five apps, scoped keys.** `search · read · ingest · wiki · admin`, per-app verticals,
+  sliding-window rate limits, secrets hashed at rest and shown once, every write audited.
+
+```bash
+npm run platform                                   # the data tier on :8090
+PLATFORM_URL=http://127.0.0.1:8090 npm start       # the app origin proxies /platform/*
+node platform/server.mjs --create-key kinetic-wiki # issue a key (printed once)
+open http://127.0.0.1:8080/wiki.html               # the wiki
+
+# or the whole stack in one command, with sample content that says it is sample
+npm run local:demo
+```
+
+**Status, plainly:** the reference server persists to JSONL on a volume and is fully tested
+(retrieval, retention, wiki, mirror, ACLs, audit). `platform/schema.sql` is the production
+Postgres + pgvector shape and `deploy/docker-compose.platform.yml --profile pgvector` applies it, but
+the adapter that makes the server read and write those tables is the next piece of work — until then
+`DATABASE_URL` is set and unused. `GraphSharePoint` is written against the documented Graph endpoints
+and has not met a real tenant. See [docs/DATA-PLATFORM.md](docs/DATA-PLATFORM.md).
 
 ## Deploy it
 
@@ -151,10 +215,13 @@ The product itself has no build step and no runtime dependencies. Tests are dev-
 
 ```bash
 npm install           # jsdom + fake-indexeddb + js-yaml (devDependencies only)
-npm test              # 378 assertions: UI + gateway + deployment layer
-npm run test:smoke    # UI behaviour only            (114)
-npm run test:gateway  # mock Ollama + proxy + real streaming in the UI  (49)
-npm run test:deploy   # installer, packager, verifier, local.sh, make, cloud-init, terraform, CI (215)
+npm test               # 859 assertions: UI + gateway + data platform + deployment layer
+npm run test:smoke     # UI behaviour only, including the wiki          (213)
+npm run test:gateway   # mock Ollama + proxy + real streaming in the UI  (50)
+npm run test:platform  # the KiNETiC-Ai data platform end to end        (299)
+npm run test:deploy    # installer, packager, verifier, local.sh, make, cloud-init, terraform, CI (297)
+npm run platform       # the data tier on :8090 (RAG + wiki + retention + mirror)
+npm run local:demo     # the whole thing — app + data tier + labelled sample content
 npm run mock          # mock inference host on :11500 for manual testing
 npm run local         # the fastest way to run the whole thing
 npm run package       # build the upload-ready artifact into dist/
@@ -162,14 +229,19 @@ npm run verify        # prove a deployment (-- --url https://… --expect-models
 npm start             # static server + gateway proxy on 0.0.0.0:8080
 ```
 
-`tests/smoke.mjs` (114 assertions) loads each page in jsdom with a real IndexedDB and WebCrypto shim
+`tests/smoke.mjs` (213 assertions) loads each page in jsdom with a real IndexedDB and WebCrypto shim
 and drives the actual UI: brand injection and the single-constant rename, theme re-tokening, a sent
 prompt with streaming to completion, TTFT/citations/throughput attached to the message, a generation
 stopped mid-stream with partial output preserved, the AES-GCM vault round-trip (including rejecting a
 wrong passphrase), the model picker, the external-endpoint confirmation gate, slash commands, and
-proof that retention 0 writes nothing to disk.
+proof that retention 0 writes nothing to disk. Its `testWiki` block drives `wiki.html` against a fake
+platform that answers the shapes `platform/server.mjs` returns, and asserts what the UI *claims*: that
+it renders nothing invented when the platform is down, that a refused key is reported in the platform's
+own words, that a read-only key is not offered write actions or other verticals' pages, that citations
+state a page only when the source gave one, that archived matches are surfaced with the reason and the
+way back in, and that the API key lives in `sessionStorage` and never in `localStorage`.
 
-`tests/gateway.mjs` (49 assertions) boots `tests/mock-ollama.mjs` plus `server.js` with `OLLAMA_URL`
+`tests/gateway.mjs` (50 assertions) boots `tests/mock-ollama.mjs` plus `server.js` with `OLLAMA_URL`
 pointed at it, then verifies: the proxy forwards and streams incrementally rather than buffering,
 `X-Accel-Buffering: no` is set, an unreachable upstream returns a 502 that explains the fix, probing
 discovers models and injects them into the picker, a prompt is genuinely served by the endpoint
@@ -177,11 +249,27 @@ discovers models and injects them into the picker, a prompt is genuinely served 
 the OpenAI-compatible SSE transport works with `usage` accounting, a dead endpoint surfaces in the
 transcript instead of hanging, and switching back to the demo responder works with no network at all.
 
-`tests/deploy.mjs` (215 assertions) treats the deployment layer as code, not prose: every script is
-syntax-checked and executable; the installer's dry-run plan covers all nine steps and changes nothing
+`tests/platform.mjs` (299 assertions) is the data platform end to end: the capacity arithmetic
+(10,226 B per chunk, 1,785,019 chunks in 20 GB, 22 GB of RAM under the 2× rule, 2.5× storage
+headroom, quotas summing to exactly the ceiling), embeddings (deterministic, normalised, semantically
+ordered), chunking that keeps identifiers whole, the admission policy refusing drafts, personal files,
+duplicates, stale and over-quota content with reasons, hybrid retrieval ranking 3/3 exact identifiers
+into the right document, the citation contract, ACLs applied in the candidate query with no existence
+leaks, the 60-day rule (demote only after the mirror verifies, keep a discoverable stub, report drift,
+reopen on demand, retrieval does not reset the clock but opening does), the wiki (immutable revisions,
+bidirectional backlinks, review queue, indexed and mirrored out), the HTTP API (hashed keys, scopes,
+verticals, rate limits, audit), JSONL persistence across a restart, `/platform/*` reachable on the app
+origin, and parity between `platform/schema.sql` and the constants in `platform/config.mjs`.
+
+`tests/deploy.mjs` (297 assertions) treats the deployment layer as code, not prose: every script is
+syntax-checked and executable; the installer's dry-run plan covers all nine steps (ten with
+`--platform`, which is checked for a loopback bind, a hardened unit, the embedding-model pull and the
+`PLATFORM_URL` it hands the app tier) and changes nothing
 on the machine; `--render-only` is checked in both TLS and plain-HTTP modes (tokens substituted,
 `proxy_buffering off`, 600 s read timeout, basic auth and allowlist injected, ACME path left open);
-`package.sh` is proven checksummed, content-complete, junk-free and **byte-reproducible**;
+`package.sh` is proven checksummed, content-complete (the platform, the wiki and the docs ship too),
+junk-free and **byte-reproducible** — including that reproducibility does not depend on when the build
+ran, which is asserted by pinning `SOURCE_DATE_EPOCH`;
 `local.sh --mock` is really started and really serves the app; `verify.sh` is run against that live
 host (passing) and against a dead port (failing with exit 1, plus valid `--json`); the Makefile's
 targets forward their variables correctly; `cloud-init.yaml` is parsed as YAML and checked for the
@@ -216,6 +304,10 @@ reference architecture, not a warranty. `DESIGN.md §13` is the pre-launch audit
 exclusion in writing, residency for inference *and* embeddings, deletion that removes vector chunks,
 DSAR coverage, transfer risk assessment, audit-log fields, key handling, latency under concurrency, and
 research profiles gated and never default.
+
+The data platform holds itself to the same rule: `docs/DATA-PLATFORM.md §9` lists what is **not**
+wired yet (the Postgres adapter, a live Graph tenant), and `wiki.html` renders nothing at all when the
+platform is down rather than showing sample pages.
 
 Sell *private, controlled, self-hosted, policy-configurable*. "Abliterated"/"uncensored" is a labelled
 research configuration, never the commercial proposition.

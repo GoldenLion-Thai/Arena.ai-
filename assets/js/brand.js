@@ -51,6 +51,7 @@
     "index.html": `${NAME} — ${TAGLINE}`,
     "app.html": `${NAME} — Private workspace`,
     "lab.html": `Behaviour Lab — ${NAME}`,
+    "wiki.html": `Wiki — ${NAME}`,
   };
 
   const SLOTS = {

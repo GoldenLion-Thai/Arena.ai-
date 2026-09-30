@@ -20,7 +20,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
 import "fake-indexeddb/auto";
-import { startMock, OLLAMA_MARKER, OPENAI_MARKER } from "./mock-ollama.mjs";
+import { startMock, OLLAMA_MARKER, OPENAI_MARKER, MODELS as MOCK_MODELS } from "./mock-ollama.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_PORT = Number(process.env.APP_PORT || 8099);
@@ -128,7 +128,11 @@ try {
   ok("static UI still served alongside the proxy", (await fetch(`${APP_ORIGIN}/app.html`)).status === 200);
 
   const tags = await (await fetch(`${APP_ORIGIN}/gateway/api/tags`)).json();
-  ok("proxy forwards GET /api/tags", Array.isArray(tags.models) && tags.models.length === 2, JSON.stringify(tags).slice(0, 80));
+  // The proxy must forward what the host says — including the embedding model a
+  // platform host has pulled. Keeping that out of the CHAT PICKER is the app's
+  // job, and is asserted below.
+  ok("proxy forwards GET /api/tags verbatim", Array.isArray(tags.models) && tags.models.length === MOCK_MODELS.length && tags.models[0].name === MOCK_MODELS[0].name, JSON.stringify(tags.models?.map((m) => m.name)));
+  ok("the host really does offer an embedding model", MOCK_MODELS.some((m) => (m.capabilities || []).includes("embeddings")), JSON.stringify(MOCK_MODELS.map((m) => m.name)));
 
   // streaming must stay incremental through the proxy
   const t0 = Date.now();
@@ -191,7 +195,10 @@ try {
 
   ok("probe reaches the endpoint through the proxy", w.GRID_GATEWAY.health === "ok", JSON.stringify(w.GRID_GATEWAY.lastProbe));
   ok("probe reports latency", w.GRID_GATEWAY.lastProbe.ms >= 0 && w.GRID_GATEWAY.lastProbe.ms < 5000);
-  ok("discovered models are listed", $$("#gwModels [data-use]").length === 2, `${$$("#gwModels [data-use]").length}`);
+  ok("only chat-capable models reach the picker",
+      $$("#gwModels [data-use]").length === MOCK_MODELS.filter((m) => (m.capabilities || []).includes("completion")).length &&
+      !/embed/i.test($("#gwModels").textContent),
+      `${$$("#gwModels [data-use]").length} chat models listed of ${MOCK_MODELS.length} on the host`);
   ok("discovered models carry size and quantisation", /14B/.test($("#gwModels").textContent) && /Q4_K_M/.test($("#gwModels").textContent));
   ok("status tag flips to connected", /connected/i.test($("#gwStatusTag").textContent), $("#gwStatusTag").textContent);
   ok("top bar says GATEWAY LIVE", $("#gwChipLabel").textContent === "GATEWAY LIVE", $("#gwChipLabel").textContent);

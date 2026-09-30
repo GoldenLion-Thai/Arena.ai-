@@ -1,0 +1,173 @@
+# KiNETiC-Ai data platform + app tier + model host, on one machine.
+#
+#   cd deploy && docker compose -f docker-compose.platform.yml up -d
+#
+# What each service is:
+#   grid-os    the only published port. Serves the UI and proxies /gateway/* to
+#              Ollama and /platform/* to the platform, so the browser makes
+#              same-origin requests and never learns an internal address.
+#   platform   node platform/server.mjs — ingest, hybrid retrieval, the wiki,
+#              retention and the SharePoint mirror. Persists JSONL to a volume.
+#   ollama     model host, and the embedding model the platform needs. Internal.
+#   model-pull one-shot: pulls the chat and embedding models, then exits.
+#
+# The `pgvector` profile adds the production database:
+#
+#   docker compose -f docker-compose.platform.yml --profile pgvector up -d
+#
+#   postgres   Postgres 16 + pgvector with ../platform/schema.sql applied on
+#              first boot: HNSW index, row level security, retention views and
+#              the capacity arithmetic. This is the production shape and it is
+#              real, inspectable SQL — but the reference server in platform/
+#              still reads and writes its JSONL store. The Postgres adapter is
+#              the next piece of work; until it lands, DATABASE_URL is set and
+#              the schema is applied, and the platform does not use it. That is
+#              stated here rather than left to be discovered.
+#
+# Sizing, from docs/DATA-PLATFORM.md: 50 GB block volume per node, a 20 GB live
+# ceiling, and 22 GB of RAM for the HNSW index plus heap at full size. Do not
+# publish 5432, 8090 or 11434 — everything reaches the browser through 8080.
+
+services:
+  grid-os:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ..:/app:ro
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      OLLAMA_URL: "http://ollama:11434" # compose DNS name, not a public host
+      GATEWAY_PREFIX: "/gateway/"
+      PLATFORM_URL: "http://platform:8090"
+    command: node server.js
+    ports:
+      - "8080:8080" # put nginx or an OCI load balancer with TLS in front of this
+    depends_on:
+      platform:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
+  platform:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ..:/app:ro # the code is read-only…
+      - platform-data:/data # …so the store lives on a writable volume
+    environment:
+      PLATFORM_PORT: "8090"
+      PLATFORM_HOST: "0.0.0.0" # inside the compose network only; not published
+      PLATFORM_DATA: "/data"
+      PLATFORM_EMBED: "auto" # Ollama embeddings, with a deterministic local fallback
+      OLLAMA_URL: "http://ollama:11434"
+      # Set when the pgvector profile is used; the adapter that reads it is the
+      # next piece of work (see the header).
+      DATABASE_URL: "postgres://kinetic:change-me@postgres:5432/kinetic"
+    command: node platform/server.mjs
+    # deliberately no `ports:` — reachable from the app tier, not from outside
+    depends_on:
+      - ollama
+    healthcheck:
+      # node:22-alpine has no curl, but it has fetch
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8090/healthz').then((r)=>r.json()).then((j)=>process.exit(j.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434" # inside the compose network only
+      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: "q8_0"
+      OLLAMA_MODELS: "/models"
+    volumes:
+      - ollama-models:/models
+    # deliberately no `ports:`
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Pull the weights once, then exit. The embedding model is what makes
+  # retrieval real; without it the platform falls back to a deterministic
+  # hashing embedder, which is honest about being lexical.
+  model-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+      CHAT_MODEL: "${CHAT_MODEL:-qwen2.5:7b-instruct-q4_K_M}"
+      EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "ollama pull $${EMBED_MODEL} && ollama pull $${CHAT_MODEL}"
+    restart: "no"
+
+  # ---------------------------------------------------- production database
+  # `docker compose --profile pgvector up -d` to include this.
+  postgres:
+    image: pgvector/pgvector:pg16
+    profiles: ["pgvector"]
+    environment:
+      POSTGRES_DB: kinetic
+      POSTGRES_USER: kinetic
+      # Change this. In production, mount a secret instead of writing it here.
+      POSTGRES_PASSWORD: change-me
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      # applied on first boot, in filename order
+      - ../platform/schema.sql:/docker-entrypoint-initdb.d/10-kinetic-schema.sql:ro
+    command:
+      - postgres
+      # Numbers from capacityPlan(): at the 20 GB ceiling the HNSW index is
+      # ~7.05 GB and the heap ~9.95 GB, so the working set wants ~10.5 GB and
+      # the policy is 2× that. maintenance_work_mem is what stops an index
+      # build spilling to disk and running 10–50× slower.
+      - -c
+      - shared_buffers=4GB
+      - -c
+      - effective_cache_size=12GB
+      - -c
+      - maintenance_work_mem=3GB
+      - -c
+      - max_connections=100 # 6 apps × 8 pooled = 48 wanted; put PgBouncer in front
+      - -c
+      - hnsw.ef_search=100
+      - -c
+      - log_min_duration_statement=500ms
+    shm_size: 1gb
+    # deliberately no `ports:` — psql in with `docker compose exec postgres psql -U kinetic`
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kinetic -d kinetic"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+# 50 GB per node is the provisioning figure; the live ceiling inside it is 20 GB
+# and the platform enforces that by demoting what nobody opens to SharePoint.
+volumes:
+  platform-data:
+  ollama-models:
+  pg-data:

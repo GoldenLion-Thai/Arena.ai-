@@ -8,15 +8,48 @@
   const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 
-  function inline(s) {
+  /* Links are opt-in (opts.links) and scheme-allowlisted. The chat renderer has
+     never emitted anchors and its output must not change; a wiki page is a
+     document, so it asks for real headings and real links. */
+  const SAFE_HREF = /^(https?:|mailto:|#|\/)/i;
+
+  function links(s) {
     return s
+      // [[slug]] or [[slug|label]] — the platform's own wiki link syntax
+      .replace(/\[\[([^\]|#]+)(?:[|#]([^\]]*))?\]\]/g, (_, slug, label) => {
+        const id = slug.trim();
+        return `<a class="wikilink" data-slug="${id}" href="#wiki:${id}">${(label || id).trim()}</a>`;
+      })
+      // [text](href) — wiki: and /wiki/ become internal links, http(s)/mailto open out
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, href) => {
+        if (/^(#?wiki:)/i.test(href)) {
+          const id = href.replace(/^(#?wiki:)/i, "").replace(/&amp;/g, "&");
+          return `<a class="wikilink" data-slug="${id}" href="#wiki:${id}">${text}</a>`;
+        }
+        if (!SAFE_HREF.test(href.replace(/&amp;/g, "&"))) return m; // javascript: and friends stay text
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      })
+      // a bare /wiki/slug in prose is a link too, matching platform/wiki.mjs extractLinks
+      .replace(/(^|[\s(])\/wiki\/([\w\-/]+)/g, (_, pre, id) => `${pre}<a class="wikilink" data-slug="${id}" href="#wiki:${id}">/wiki/${id}</a>`);
+  }
+
+  function inline(s, opts) {
+    const out = s
       .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
       .replace(/_([^_\n]+)_/g, "<em>$1</em>");
+    return opts && opts.links ? links(out) : out;
   }
 
-  function render(src) {
+  /**
+   * @param {string} src markdown-ish source
+   * @param {{documentHeadings?:boolean, links?:boolean}} [opts]
+   *   documentHeadings  map # → h1 … ###### → h6 (a document). The default
+   *                     clamps to h4–h6, which suits a chat bubble.
+   *   links             render [text](href) and [[slug]] as anchors
+   */
+  function render(src, opts) {
     const lines = escape(src || "").split("\n");
     const out = [];
     let i = 0;
@@ -55,9 +88,9 @@
         while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(cells(lines[i++]));
         out.push(
           `<div class="table-wrap" style="margin:12px 0"><table><thead><tr>${head
-            .map((h) => `<th>${inline(h)}</th>`)
+            .map((h) => `<th>${inline(h, opts)}</th>`)
             .join("")}</tr></thead><tbody>${rows
-            .map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`)
+            .map((r) => `<tr>${r.map((c) => `<td>${inline(c, opts)}</td>`).join("")}</tr>`)
             .join("")}</tbody></table></div>`
         );
         continue;
@@ -67,8 +100,9 @@
       const h = line.match(/^(#{1,6})\s+(.*)$/);
       if (h) {
         closeList();
-        const lvl = Math.min(6, Math.max(4, h[1].length));
-        out.push(`<h${lvl}>${inline(h[2])}</h${lvl}>`);
+        const floor = opts && opts.documentHeadings ? 1 : 4; // chat bubbles never want an h1
+        const lvl = Math.min(6, Math.max(floor, h[1].length));
+        out.push(`<h${lvl}>${inline(h[2], opts)}</h${lvl}>`);
         i++;
         continue;
       }
@@ -83,7 +117,7 @@
           out.push(`<${want}>`);
           list = want;
         }
-        out.push(`<li>${inline((ul || ol)[1])}</li>`);
+        out.push(`<li>${inline((ul || ol)[1], opts)}</li>`);
         i++;
         continue;
       }
@@ -104,7 +138,7 @@
       }
 
       closeList();
-      out.push(`<p style="margin:0 0 10px">${inline(line)}</p>`);
+      out.push(`<p style="margin:0 0 10px">${inline(line, opts)}</p>`);
       i++;
     }
     closeList();

@@ -207,19 +207,37 @@
     return lastProbe;
   }
 
+  /**
+   * An embedding model is not a chat model.
+   *
+   * A host that runs the data platform has one pulled, and Ollama lists it in
+   * /api/tags beside the chat models. Offering it in the picker means the user
+   * selects it and gets nothing back, so it is filtered here. Ollama 0.3+
+   * reports `capabilities`; older hosts do not, so fall back on family and
+   * name, which is how embedding models are published in the library.
+   */
+  function isChatModel(m) {
+    if (Array.isArray(m.capabilities)) return m.capabilities.includes("completion");
+    const d = m.details || {};
+    const fam = String((d.families && d.families.join(" ")) || d.family || "").toLowerCase();
+    const name = String(m.name || m.model || m.id || "").toLowerCase();
+    return !/(embed|clip|rerank|whisper|bark)/.test(fam + " " + name);
+  }
+
   function normaliseModels(json) {
     if (Array.isArray(json?.models))
       // Ollama /api/tags
-      return json.models.map((m) => ({
+      return json.models.filter(isChatModel).map((m) => ({
         id: m.name || m.model,
         size: m.size,
         family: (m.details && m.details.family) || "",
         params: (m.details && m.details.parameter_size) || "",
         quant: (m.details && m.details.quantization_level) || "",
+        capabilities: m.capabilities || null,
       }));
     if (Array.isArray(json?.data))
       // OpenAI-compatible /v1/models
-      return json.data.map((m) => ({ id: m.id, size: 0, family: "", params: "", quant: "", owned: m.owned_by }));
+      return json.data.filter(isChatModel).map((m) => ({ id: m.id, size: 0, family: "", params: "", quant: "", owned: m.owned_by }));
     return [];
   }
 

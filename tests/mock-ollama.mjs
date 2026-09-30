@@ -14,22 +14,35 @@
    ========================================================================== */
 
 import http from "node:http";
+import { hashEmbed } from "../platform/embeddings.mjs";
 
 export const OLLAMA_MARKER = "MOCK-OLLAMA-9F3C";
 export const OPENAI_MARKER = "MOCK-OPENAI-7A21";
 
-const MODELS = [
+export const MODELS = [
   {
     name: "qwen2.5:14b-instruct-q4_K_M",
     model: "qwen2.5:14b-instruct-q4_K_M",
     size: 9_100_000_000,
-    details: { family: "qwen2", parameter_size: "14B", quantization_level: "Q4_K_M" },
+    details: { family: "qwen2", families: ["qwen2"], parameter_size: "14B", quantization_level: "Q4_K_M" },
+    capabilities: ["completion"],
   },
   {
     name: "qwen2.5:coder7b-q4_K_M",
     model: "qwen2.5:coder7b-q4_K_M",
     size: 4_700_000_000,
-    details: { family: "qwen2", parameter_size: "7B", quantization_level: "Q4_K_M" },
+    details: { family: "qwen2", families: ["qwen2"], parameter_size: "7B", quantization_level: "Q4_K_M" },
+    capabilities: ["completion"],
+  },
+  {
+    // Embedding model, as Ollama lists it: no chat, used by the KiNETiC-Ai
+    // tier. A host that runs the platform has one pulled, and /api/tags
+    // reports capabilities — the chat picker must not offer it.
+    name: "nomic-embed-text:latest",
+    model: "nomic-embed-text:latest",
+    size: 274_000_000,
+    details: { family: "nomic-bert", families: ["nomic-bert"], parameter_size: "137M", quantization_level: "F16" },
+    capabilities: ["embeddings"],
   },
 ];
 
@@ -73,6 +86,33 @@ export async function startMock(port = 0) {
       return res.end(
         JSON.stringify({ object: "list", data: MODELS.map((m) => ({ id: m.name, object: "model", owned_by: "library" })) })
       );
+    }
+
+    // --- embeddings: /api/embed (batch, modern) and /api/embeddings (legacy),
+    // plus the OpenAI-compatible /v1/embeddings. Deterministic vectors from the
+    // same hash embedder the platform falls back to, so retrieval behaviour is
+    // identical whether the real model host is present or not.
+    if (url === "/api/embed" || url === "/api/embeddings" || url === "/v1/embeddings") {
+      const body = await readBody(req);
+      const inputs = url === "/api/embed"
+        ? (Array.isArray(body.input) ? body.input : body.input ? [body.input] : [body.prompt || ""])
+        : url === "/v1/embeddings"
+          ? (Array.isArray(body.input) ? body.input : [body.input || ""])
+          : [body.prompt || ""];
+      const vectors = inputs.map((t) => Array.from(hashEmbed(String(t))));
+      if (url === "/v1/embeddings") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({
+          object: "list",
+          model: body.model || "nomic-embed-text",
+          data: vectors.map((v, i) => ({ object: "embedding", index: i, embedding: v })),
+          usage: { prompt_tokens: inputs.join(" ").split(/\s+/).length, total_tokens: inputs.join(" ").split(/\s+/).length },
+        }));
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify(url === "/api/embed"
+        ? { model: body.model || "nomic-embed-text", embeddings: vectors }
+        : { model: body.model || "nomic-embed-text", embedding: vectors[0] }));
     }
 
     if (url === "/api/chat") {
