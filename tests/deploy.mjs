@@ -25,7 +25,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DEPLOY = join(ROOT, "deploy");
 const LOCAL_PORT = Number(process.env.DEPLOY_TEST_PORT || 8123);
 const LOCAL_OLLAMA_PORT = Number(process.env.DEPLOY_TEST_OLLAMA_PORT || 11599);
-const LOCAL_PLATFORM_PORT = Number(process.env.DEPLOY_TEST_PLATFORM_PORT || 8199);
+const LOCAL_PLATFORM_PORT = Number(process.env.DEPLOY_TEST_PLATFORM_PORT || 8299); // not 8199: a manual demo once took it
 const LOCAL_URL = `http://127.0.0.1:${LOCAL_PORT}`;
 // Platform state lives in a temp dir, so a test run never writes into the repo.
 const PLATFORM_DATA = mkdtempSync(join(tmpdir(), "grid-platform-data-"));
@@ -62,11 +62,11 @@ function sh(cmd, args, opts = {}) {
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const exists = (p) => existsSync(join(ROOT, p));
 
-async function fetchText(url, ms = 8000) {
+async function fetchText(url, ms = 8000, headers = null) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
   try {
-    const res = await fetch(url, { signal: ctl.signal });
+    const res = await fetch(url, { signal: ctl.signal, headers: headers || undefined });
     return { status: res.status, body: await res.text() };
   } catch (e) {
     return { status: 0, body: String(e.message || e) };
@@ -271,11 +271,20 @@ ok("local.sh starts the data platform on the port it was given", /KiNETiC-Ai dat
 ok("local.sh reports the platform's own health numbers", /"liveGB"/.test(localLog) && /"ceilingGB":20/.test(localLog), (localLog.match(/platform: .*/) || [""])[0].slice(0, 160));
 ok("local.sh says fixture content is not a live corpus", /fixture content — sample documents, not a live corpus/i.test(localLog));
 ok("local.sh prints the command that issues a wiki key", /--create-key --app kinetic-wiki/.test(localLog));
+
+/* A wiki you cannot open is a poor demo, so --fixtures issues a key too. It is
+   created before the server starts, so one process owns the store. */
+const demoKey = (localLog.match(/ka_[A-Za-z0-9_-]{20,}/) || [null])[0];
+ok("--fixtures issues a demo wiki key and pastes it into the banner", !!demoKey && /paste this key/.test(localLog), (localLog.match(/.*paste this key.*/) || ["none"])[0].slice(0, 120));
+ok("the demo key is labelled as a local demo key with admin scope", /local demo key with admin scope/i.test(localLog) && /Do not reuse it anywhere real/i.test(localLog));
+const keyedPages = demoKey ? await fetchText(`${LOCAL_URL}/platform/v1/wiki/pages`, 6000, { authorization: `Bearer ${demoKey}` }) : { status: 0, body: "no key in the banner" };
+ok("the demo key really works against the running platform", keyedPages.status === 200 && /"pages":\[/.test(keyedPages.body || ""), `HTTP ${keyedPages.status} ${(keyedPages.body || "").slice(0, 160)}`);
 ok("local.sh points the app tier at the platform", /PLATFORM_URL/.test(read("deploy/local.sh")) && localLog.includes("/wiki.html"));
 
 const platHz = await fetchText(`http://127.0.0.1:${LOCAL_PLATFORM_PORT}/healthz`, 3000);
 ok("the platform answers on its own loopback port", platHz.status === 200 && /"ok":true/.test(platHz.body || ""), JSON.stringify(platHz).slice(0, 140));
 ok("the platform reports the fixtures it seeded", /"fixtureContent":true/.test(platHz.body || "") && /"documents":11/.test(platHz.body || ""), (platHz.body || "").slice(0, 220));
+ok("the platform embedded through the model host, not the offline fallback", /"embedder":"nomic-embed-text"/.test(platHz.body || ""), (platHz.body || "").slice(0, 200));
 
 const proxiedHz = await fetchText(`${LOCAL_URL}/platform/healthz`, 3000);
 ok("the app origin proxies /platform/* to the data tier", proxiedHz.status === 200 && /"platform":"KiNETiC-Ai"/.test(proxiedHz.body || ""), JSON.stringify(proxiedHz).slice(0, 160));
@@ -540,7 +549,12 @@ await wait(400);
 try { process.kill(-local.pid, "SIGKILL"); } catch { /* already gone */ }
 rmSync(distA, { recursive: true, force: true });
 rmSync(distB, { recursive: true, force: true });
-ok("local.sh stack shut down cleanly", (await fetchText(`${LOCAL_URL}/healthz`, 1500)).status === 0);
+let down = false;
+for (let i = 0; i < 12 && !down; i++) {
+  await wait(250);
+  down = (await fetchText(`${LOCAL_URL}/healthz`, 1200)).status === 0 && (await fetchText(`http://127.0.0.1:${LOCAL_PLATFORM_PORT}/healthz`, 1200)).status === 0;
+}
+ok("local.sh stack shut down cleanly — app tier and data platform both gone", down);
 
 console.log(`\n${passed} passed · ${failed} failed`);
 if (notes.length) {

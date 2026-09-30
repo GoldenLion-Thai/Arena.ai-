@@ -37,6 +37,7 @@ PLATFORM=0
 PLATFORM_PORT="8090"
 PLATFORM_DATA=".data/platform"
 FIXTURES=0
+DEMO_KEY=""            # set only by --fixtures; declared here so `set -u` is happy
 NO_OPEN=0
 SKIP_PULL=0
 NO_INSTALL=0
@@ -168,6 +169,16 @@ if [[ $PLATFORM -eq 1 ]]; then
   info "starting the KiNETiC-Ai data platform on 127.0.0.1:${PLATFORM_PORT} → embeddings http://127.0.0.1:${OLLAMA_PORT}"
   PLAT_ARGS=(--port "$PLATFORM_PORT" --host 127.0.0.1 --data-dir "$PLATFORM_DATA_DIR" --ollama "http://127.0.0.1:${OLLAMA_PORT}")
   [[ $FIXTURES -eq 1 ]] && PLAT_ARGS+=(--fixtures)
+
+  # Issue the demo key BEFORE the server starts, so one process writes the store
+  # and the server simply loads it — no two writers racing on the same JSONL.
+  if [[ $FIXTURES -eq 1 ]]; then
+    DEMO_KEY=$( cd "$REPO_ROOT" && node platform/server.mjs --create-key --app kinetic-wiki \
+      --scopes search,read,wiki,ingest,admin --verticals "*" --data-dir "$PLATFORM_DATA_DIR" 2>/dev/null \
+      | sed -n 's/.*"secret": "\(ka_[A-Za-z0-9_-]*\)".*/\1/p' )
+    [[ -n $DEMO_KEY ]] && good "demo key issued for the wiki (pasted below — local demo only)" \
+                        || warn "could not issue a demo key; run the --create-key command below yourself"
+  fi
   ( cd "$REPO_ROOT" && node platform/server.mjs "${PLAT_ARGS[@]}" ) &
   PIDS+=($!)
   for _ in $(seq 1 30); do
@@ -219,8 +230,9 @@ ${A}Ready${O}
 
   In the workspace: ⚙ Settings → "Ollama (localhost)" or "Same-origin proxy"
   → Save & probe. The top-bar chip should read ${G}GATEWAY LIVE${O}.
+$([[ -n $DEMO_KEY ]] && printf '\n  In the wiki: paste this key → %s%s%s\n  It is a local demo key with admin scope. Do not reuse it anywhere real.\n' "$G" "$DEMO_KEY" "$O")
+  ${D}Ctrl-C stops this script, the app tier$([[ $PLATFORM -eq 1 ]] && echo ", the data platform")$([[ $started_ollama -eq 1 ]] && echo " and the ollama host it started")${O}
 
-  ${D}Ctrl-C stops this script, the app tier$([[ $started_ollama -eq 1 ]] && echo " and the ollama host it started")${O}
 EOF
 
 # stay in the foreground so the trap and the child processes behave

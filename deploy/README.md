@@ -32,7 +32,12 @@ issues a wiki key. `--platform-data` takes a relative path (resolved against the
 repo) or an absolute one, so state can live on a mounted volume instead of inside
 the checkout. `--fixtures` seeds six documents and five wiki pages through the real
 ingestion, wiki and retention paths — and every one of them is labelled as sample
-content in the store, in `/healthz` and in the wiki's own state panel.
+content in the store, in `/healthz` and in the wiki's own state panel. It also
+issues a wiki key and pastes it into the banner, because a wiki you cannot open is
+a poor demo. That key has admin scope and exists for a local demo only: it is
+printed to the console, stored as a hash, and should never be reused anywhere
+real. The key is created *before* the platform starts, so one process owns the
+store and there is no second writer on the same JSONL.
 
 It checks node ≥ 18, installs Ollama if it is missing (macOS: Homebrew;
 Linux/WSL: the official installer), starts the model host on loopback, pulls the
