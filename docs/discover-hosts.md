@@ -61,6 +61,32 @@ give it a section in `SOT-fleet-inventory.md`.
 
 ---
 
+### Public recon has already been tried — here is what it established
+
+On 2026-09-15 I ran the external recon route as far as it goes. Recording it so nobody
+repeats it:
+
+| Finding | Detail |
+|---|---|
+| Confirmed domains | `ascendant-ai.uk` and `kinetic-ai.uk` — both on Cloudflare |
+| Mail origin | `mail.ascendant-ai.uk` → `72.61.203.79` (asci-vps-1), confirmed by PTR |
+| **Wildcard** | `*.ascendant-ai.uk` resolves to `72.61.203.79` for *any* name, **unproxied** |
+| Not theirs | `ascendant-ai.com` is parked on Afternic; `merc-os.ai` and `kinetic-ai.ai` are NXDOMAIN |
+| Former site | `shopfrontgroup.co.uk` was on that IP until 2026-05-01, now NXDOMAIN |
+| **`asci-vps-2`** | **No DNS footprint found. Not discoverable this way.** |
+
+The wildcard is the reason subdomain hunting cannot work here: every name returns the same
+address, so a hit on `vps2.ascendant-ai.uk` is meaningless. I confirmed this by resolving a
+deliberately random hostname and getting the same IP back.
+
+That wildcard is also a security finding in its own right — it publishes the origin IP that
+the Cloudflare-proxied apex is supposed to hide. See `SOT-fleet-inventory.md` §2.
+
+**So `asci-vps-2` must come from the account, the billing record, or the welcome email.**
+Everything below is the account-and-evidence route.
+
+---
+
 ## 3. Finding `asci-vps-3` — the indirect routes
 
 There is no known account for it, so search for the *evidence* a server leaves behind.

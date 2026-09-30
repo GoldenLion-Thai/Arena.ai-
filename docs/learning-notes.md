@@ -265,3 +265,43 @@ bash: the last one wins, quietly. That is why the symptom was a stray line, not 
 paths, not the happy path — empty confirmation aborts, wrong confirmation aborts, and an
 unreachable host is refused with "refusing to reboot a host I cannot verify". Never test a
 destructive command by running it against a real host; test that it says no.
+
+---
+
+## 2026-09-15 03:45 — Recon for the missing hosts: what worked, what didn't
+
+Tried to find `asci-vps-2` from the outside. **Result: not found.** But the attempt found
+things that matter more than the thing I was looking for.
+
+**What worked — reverse DNS was the key that unlocked everything.** Raw sockets are proxied
+in this environment, so `merc probe` and any direct scanning are useless. But HTTP egress
+through the page-fetch tool works, which means public DNS APIs are reachable:
+
+```
+https://dns.google/resolve?name=<host>&type=<A|NS|MX|TXT>
+https://api.hackertarget.com/dnslookup/?q=<host>
+https://api.hackertarget.com/reversedns/?q=<ip>
+```
+
+A **PTR lookup on the known IP** (`72.61.203.79`) returned `mail.ascendant-ai.uk` — which
+handed over the domain name. Everything else followed from that: two domains confirmed
+(`ascendant-ai.uk`, `kinetic-ai.uk`), both Cloudflare, mail origin identified.
+
+**Findings worth keeping:**
+- `*.ascendant-ai.uk` is a **wildcard resolving to the same IP, unproxied**. Verified with a
+  random hostname, not by assuming. This leaks the origin IP behind the Cloudflare apex.
+- **Corollary:** with a wildcard in place, a subdomain resolving to an IP proves nothing.
+  `vps2.ascendant-ai.uk` looked like a hit and was just the catch-all. Test the negative
+  case before believing a positive.
+- `ascendant-ai.com` is a parked domain on Afternic and is **not theirs** — a trap for
+  anyone (including future me) pattern-matching on the brand name.
+- `merc-os.ai` and `kinetic-ai.ai` do not exist.
+
+**Why `asci-vps-2` was not found:** it has no discoverable DNS footprint. Either it has no
+domain pointed at it, or it sits behind the wildcard where nothing distinguishes it. Public
+recon cannot reach it — it needs the account, the billing record, or the welcome email.
+**Lesson:** absence of DNS evidence is not evidence of absence. It is only evidence that
+this method has run out.
+
+**Standing method note:** when raw network access is blocked, look for the HTTP-reachable
+research APIs. They are a different path to the same answer.

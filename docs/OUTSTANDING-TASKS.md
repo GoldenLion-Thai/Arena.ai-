@@ -61,6 +61,8 @@ Nothing on the servers themselves is touched.
 | 2 | **Reboot** | `kami-vps-1` | `*** System restart required ***` since 2026-09-15 — kernel update not yet active. |
 | 3 | **Verify n8n auth** | `asci-vps-1` | `asci-vps-moltbot` binds `0.0.0.0:5678`. If no owner account is set, anyone reaching that port can claim the instance. Prefer putting it behind Caddy on 443. |
 
+| 3b | **Proxy or delete the wildcard `*.ascendant-ai.uk` DNS record** | `asci-vps-1` | Any subdomain — including names that were never created — resolves to `72.61.203.79` **unproxied**. Confirmed with a random hostname. This publishes the origin IP that the Cloudflare-proxied apex is meant to hide, and it makes subdomain lookups useless for identifying other hosts. Fix in Cloudflare DNS. |
+
 **Fix for #1** — create a file that sorts *first*:
 
 ```

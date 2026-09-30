@@ -187,7 +187,42 @@ is not serving plain HTTP on a raw port.
 - ⬜ Identify ports `37789` and `20241`.
 - ⬜ Record host key fingerprint.
 - ⬜ Check hPanel firewall (second layer, invisible from inside) and snapshots.
+- ⚠️ **Proxy the or delete the wildcard `*.ascendant-ai.uk` record** (see DNS section) — it
+  publishes this host's IP to anyone who asks.
 - ⬜ Note renewal date and price — Hostinger intro pricing ≠ renewal pricing.
+
+### DNS and domains (confirmed 2026-09-15 by public DNS lookups)
+
+| Record | Value |
+|---|---|
+| `ascendant-ai.uk` | apex **proxied** by Cloudflare — A `188.114.97.1`, `188.114.96.1`; NS `desiree/jerome.ns.cloudflare.com` |
+| `*.ascendant-ai.uk` | **wildcard**, **NOT proxied** → `72.61.203.79` (this host) |
+| `mail.ascendant-ai.uk` | `72.61.203.79` — DNS-only, PTR confirms it |
+| `kinetic-ai.uk` | apex **proxied** by Cloudflare — A `172.67.209.122`, `104.21.23.67`; MX `mail.ascendant-ai.uk`; SPF `v=spf1 ip4:72.61.203.79 ~all` |
+| `ascendant-ai.uk` TXT | `v=spf1 mx -all`, plus Google and Perplexity domain verifications |
+
+### ⚠️ Finding — the wildcard record leaks the origin IP
+
+`*.ascendant-ai.uk` resolves to `72.61.203.79` for **any** subdomain, and it is **not**
+behind Cloudflare (the apex is, the wildcard is not). Verified by querying a random name
+(`zqxj-not-a-real-host-9182.ascendant-ai.uk`) which returned the same address.
+
+Consequences:
+- Anyone can discover the real server behind the Cloudflare-proxied apex in one query,
+  which defeats much of the point of putting the apex behind Cloudflare.
+- Any hostname an attacker guesses lands on this host's Caddy/nginx.
+- It also means **subdomain lookups cannot be used to identify other hosts** — every name
+  returns this same IP, so `vps2.ascendant-ai.uk` resolving here proves nothing.
+
+**Fix:** in Cloudflare DNS, either proxy the wildcard record (orange cloud) or delete it if
+it is not needed. Prefer explicit records for the subdomains you actually use.
+
+### Not yours — avoid confusion
+
+- `ascendant-ai.com` — parked on Afternic, `v=spf1 -all`, not this estate.
+- `merc-os.ai`, `kinetic-ai.ai` — do not exist (NXDOMAIN).
+- `shopfrontgroup.co.uk` — formerly hosted on `72.61.203.79`, last resolved 2026-05-01,
+  now NXDOMAIN. A former or client site, not current infrastructure.
 
 ---
 
