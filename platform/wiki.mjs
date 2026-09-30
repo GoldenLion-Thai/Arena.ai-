@@ -20,11 +20,19 @@ const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").repla
 export const wikiSlug = (verticalId, title) => `${verticalId}/${slugify(title)}`;
 
 /** [[like this]] or [text](wiki:slug) or a bare /wiki/slug path. */
+/* A link target is normalised per path segment, never as one string: the UI
+   treats [[legal/msa-northwind]] as a slug verbatim, and slugifying the whole
+   thing turned the slash into a dash, so the link matched no page and the
+   backlink quietly disappeared. Title-shaped links ([[How answering works]])
+   still normalise to a tail and are matched against every page's slug tail. */
+export const linkSlug = (s) =>
+  String(s ?? "").trim().toLowerCase().split("/").map((part) => slugify(part)).filter(Boolean).join("/");
+
 export function extractLinks(body) {
   const out = new Set();
-  for (const m of String(body).matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) out.add(slugify(m[1]));
-  for (const m of String(body).matchAll(/\[[^\]]*\]\((?:wiki:|\/wiki\/)([^)\s]+)\)/g)) out.add(slugify(m[1]));
-  for (const m of String(body).matchAll(/(?<![\w)\]])\/wiki\/([\w\-/]+)/g)) out.add(slugify(m[1])); // bare paths in prose
+  for (const m of String(body).matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) out.add(linkSlug(m[1]));
+  for (const m of String(body).matchAll(/\[[^\]]*\]\((?:wiki:|\/wiki\/)([^)\s]+)\)/g)) out.add(linkSlug(m[1]));
+  for (const m of String(body).matchAll(/(?<![\w)\]])\/wiki\/([\w\-/]+)/g)) out.add(linkSlug(m[1])); // bare paths in prose
   return [...out].filter(Boolean);
 }
 
@@ -129,7 +137,12 @@ export function reviewQueue(store, { at = Date.now(), daysAhead = 30 } = {}) {
   const out = [];
   for (const p of store.data.wiki_pages) {
     if (!p.reviewBy) continue;
-    const due = Date.parse(p.reviewBy);
+    // reviewBy is an ISO string everywhere the platform writes it, but a caller
+    // (or an import) can hand over epoch millis. Coerce both: a queue that drops
+    // a page because of the timestamp's shape hides overdue reviews, which is
+    // exactly what this queue exists to prevent.
+    const due = typeof p.reviewBy === "number" ? p.reviewBy : Date.parse(p.reviewBy);
+    if (!Number.isFinite(due)) continue;
     const days = Math.round((due - at) / 86_400_000);
     if (days <= daysAhead) out.push({ slug: p.slug, title: p.title, vertical: p.vertical, owner: p.owner, reviewBy: p.reviewBy, daysUntilDue: days, overdue: days < 0, revision: p.revision, updatedBy: p.updatedBy });
   }
@@ -228,4 +241,4 @@ export function stats(store) {
   };
 }
 
-export default { createPage, updatePage, reindex, refreshBacklinks, reviewQueue, diff, searchPages, mirrorPages, stats, extractLinks, frontMatter, wikiSlug };
+export default { createPage, updatePage, reindex, refreshBacklinks, reviewQueue, diff, searchPages, mirrorPages, stats, statsFor, extractLinks, frontMatter, wikiSlug, linkSlug };

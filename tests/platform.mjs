@@ -539,7 +539,29 @@ section("wiki — revisions, backlinks, review, indexing, mirror");
 
   const stats = wiki.stats(store);
   ok("wiki stats are reported", stats.pages === store.data.wiki_pages.length && stats.revisions >= stats.pages && stats.indexed === stats.pages);
+  {
+    const q = new MemoryStore({});
+    q.putWikiPage({ vertical: "compliance", slug: "compliance/numeric-review", title: "Numeric review date", body: "x", revision: 1, tags: [], backlinks: [] });
+    const numeric = q.getWikiPage("compliance/numeric-review");
+    numeric.reviewBy = Date.now() - 3 * DAY; // epoch millis, not an ISO string
+    q.putWikiPage(numeric);
+    const queued = wiki.reviewQueue(q, { daysAhead: 30 });
+    ok("a numeric reviewBy is coerced, not silently dropped from the queue", queued.length === 1 && queued[0].slug === "compliance/numeric-review" && queued[0].overdue === true && queued[0].daysUntilDue === -3, JSON.stringify(queued));
+    const junk = q.getWikiPage("compliance/numeric-review");
+    junk.reviewBy = "not a date";
+    q.putWikiPage(junk);
+    ok("an unparseable review date is skipped rather than reported as NaN", wiki.reviewQueue(q, { daysAhead: 30 }).length === 0, JSON.stringify(wiki.reviewQueue(q, { daysAhead: 30 })));
+  }
+
   ok("wiki links are extracted from both syntaxes", wiki.extractLinks("see [[Alpha]] and [beta](wiki:shared/beta) and /wiki/gamma").length === 3);
+
+  /* A slug-shaped link is a path, not a phrase: [[legal/msa-northwind]] must stay
+     "legal/msa-northwind". Slugifying the whole string turned the slash into a
+     dash, the link matched no page, and the backlink vanished without an error —
+     which is how a wiki quietly stops knowing what points at a page. */
+  ok("a slug-shaped wikilink keeps its slash", wiki.linkSlug("legal/MSA — Northwind") === "legal/msa-northwind" && wiki.extractLinks("see [[shared/how-answering-works]]")[0] === "shared/how-answering-works", JSON.stringify(wiki.extractLinks("see [[shared/how-answering-works]]")));
+  ok("a title-shaped wikilink still normalises to a tail", wiki.extractLinks("see [[How answering works]]")[0] === "how-answering-works", JSON.stringify(wiki.extractLinks("see [[How answering works]]")));
+  ok("a labelled wikilink keeps the target, not the label", wiki.extractLinks("[[legal/msa-northwind|the Northwind MSA]]")[0] === "legal/msa-northwind");
 }
 
 /* ================================================================= API */
@@ -1002,6 +1024,16 @@ section("boot — the embedder the routes use, and fixtures that admit what they
   ok("the archived fixture is surfaced with the reason and the way back in", legal.cold.length === 1 && /reverted to SharePoint/.test(legal.cold[0].reason) && /\/rehydrate$/.test(legal.cold[0].reopen), JSON.stringify(legal.cold[0] || {}).slice(0, 200));
   ok("the identifiers the retrieval contract promises are in the seeded corpus", FIXTURE_DOCS.some((d) => d.text.includes("clause 14.2")) && FIXTURE_DOCS.some((d) => d.text.includes("FCA-2024-118")));
   ok("seeding is audited as seeding", p.store.auditLog({ action: "fixtures.seeded" }).length === 1);
+
+  const index = p.store.getWikiPage("shared/knowledge-index");
+  const howItWorks = p.store.getWikiPage("shared/how-answering-works");
+  const msa = p.store.getWikiPage("legal/msa-northwind");
+  ok("the seeded index page's slug links resolve into real backlinks", howItWorks.backlinks.includes("shared/knowledge-index") && msa.backlinks.includes("shared/knowledge-index"), JSON.stringify({ how: howItWorks.backlinks, msa: msa.backlinks }));
+  ok("a page cited from two places lists both, and nothing points at the index", howItWorks.backlinks.includes("compliance/retention-and-the-60-day-rule") && index.backlinks.length === 0, JSON.stringify({ how: howItWorks.backlinks, index: index.backlinks }));
+
+  const reviews = wiki.reviewQueue(p.store, { daysAhead: 30 });
+  ok("the seeded review queue is not empty — one page is deliberately overdue", reviews.length === 1 && reviews[0].slug === "compliance/retention-and-the-60-day-rule" && reviews[0].overdue === true && reviews[0].daysUntilDue === -3, JSON.stringify(reviews));
+  ok("the page due in 180 days is not in a 30-day queue", !reviews.some((r) => r.slug === "legal/msa-northwind"));
 
   await new Promise((r) => p.server.listen(0, "127.0.0.1", r));
   const hz = await (await fetch(`http://127.0.0.1:${p.server.address().port}/healthz`)).json();

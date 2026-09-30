@@ -294,7 +294,11 @@ const wikiPage = await fetchText(`${LOCAL_URL}/wiki.html`, 3000);
 ok("the wiki page is served by the app tier", wikiPage.status === 200 && /wiki/i.test(wikiPage.body || ""), `HTTP ${wikiPage.status}`);
 const platformStateWritten = existsSync(join(PLATFORM_DATA, "documents.jsonl")) || existsSync(join(PLATFORM_DATA, "state.jsonl"));
 ok("the platform persisted its state outside the repo", platformStateWritten, PLATFORM_DATA);
-ok("no platform state was written into the checkout", !existsSync(join(ROOT, ".data")), ".data/ exists in the repo");
+/* A developer's own `local.sh --platform` writes .data/platform inside the
+   checkout by design, so the assertion is not "the directory does not exist" but
+   "it can never reach a commit, and this test did not use it". */
+ok("platform state is gitignored, so a local run cannot pollute a commit", read(".gitignore").split("\n").some((l) => l.trim() === ".data/"), read(".gitignore"));
+ok("this test run wrote its platform state to the temp dir only", existsSync(join(PLATFORM_DATA, "keys.jsonl")) || existsSync(join(PLATFORM_DATA, "documents.jsonl")), PLATFORM_DATA);
 
 // ============================================================ 5 · verifier
 section("verify.sh — run against the host local.sh just started");

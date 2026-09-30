@@ -12,8 +12,8 @@ Everything below is backed by code in `platform/` and by tests you can run:
 
 ```bash
 npm install
-npm test                 # 863 assertions: smoke + gateway + platform + deploy
-npm run test:platform    # 299 — the platform assertions on their own
+npm test                 # 873 assertions: smoke + gateway + platform + deploy
+npm run test:platform    # 308 — the platform assertions on their own
 ```
 
 ---

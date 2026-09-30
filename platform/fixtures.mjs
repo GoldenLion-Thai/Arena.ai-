@@ -309,7 +309,7 @@ export async function seedFixtures(platform, { at = now, coldAfterDays = 61 } = 
   }
 
   for (const p of FIXTURE_PAGES) {
-    const reviewBy = p.reviewDays == null ? null : at + p.reviewDays * DAY;
+    const reviewBy = p.reviewDays == null ? null : new Date(at + p.reviewDays * DAY).toISOString();
     const res = await createPage(store, embedder, {
       title: p.title,
       body: p.body,

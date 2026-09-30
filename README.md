@@ -215,11 +215,11 @@ The product itself has no build step and no runtime dependencies. Tests are dev-
 
 ```bash
 npm install           # jsdom + fake-indexeddb + js-yaml (devDependencies only)
-npm test               # 863 assertions: UI + gateway + data platform + deployment layer
+npm test               # 873 assertions: UI + gateway + data platform + deployment layer
 npm run test:smoke     # UI behaviour only, including the wiki          (213)
 npm run test:gateway   # mock Ollama + proxy + real streaming in the UI  (50)
-npm run test:platform  # the KiNETiC-Ai data platform end to end        (299)
-npm run test:deploy    # installer, packager, verifier, local.sh, make, cloud-init, terraform, CI (301)
+npm run test:platform  # the KiNETiC-Ai data platform end to end        (308)
+npm run test:deploy    # installer, packager, verifier, local.sh, make, cloud-init, terraform, CI (302)
 npm run platform       # the data tier on :8090 (RAG + wiki + retention + mirror)
 npm run local:demo     # the whole thing — app + data tier + labelled sample content
 npm run mock          # mock inference host on :11500 for manual testing
@@ -249,7 +249,7 @@ discovers models and injects them into the picker, a prompt is genuinely served 
 the OpenAI-compatible SSE transport works with `usage` accounting, a dead endpoint surfaces in the
 transcript instead of hanging, and switching back to the demo responder works with no network at all.
 
-`tests/platform.mjs` (299 assertions) is the data platform end to end: the capacity arithmetic
+`tests/platform.mjs` (308 assertions) is the data platform end to end: the capacity arithmetic
 (10,226 B per chunk, 1,785,019 chunks in 20 GB, 22 GB of RAM under the 2× rule, 2.5× storage
 headroom, quotas summing to exactly the ceiling), embeddings (deterministic, normalised, semantically
 ordered), chunking that keeps identifiers whole, the admission policy refusing drafts, personal files,
@@ -261,7 +261,7 @@ bidirectional backlinks, review queue, indexed and mirrored out), the HTTP API (
 verticals, rate limits, audit), JSONL persistence across a restart, `/platform/*` reachable on the app
 origin, and parity between `platform/schema.sql` and the constants in `platform/config.mjs`.
 
-`tests/deploy.mjs` (301 assertions) treats the deployment layer as code, not prose: every script is
+`tests/deploy.mjs` (302 assertions) treats the deployment layer as code, not prose: every script is
 syntax-checked and executable; the installer's dry-run plan covers all nine steps (ten with
 `--platform`, which is checked for a loopback bind, a hardened unit, the embedding-model pull and the
 `PLATFORM_URL` it hands the app tier) and changes nothing
