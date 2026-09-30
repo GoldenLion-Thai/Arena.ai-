@@ -1,0 +1,226 @@
+name: Release + deploy
+
+# Automated release path:
+#   git tag v1.0.1 && git push origin v1.0.1
+# → tests → reproducible artifact → GitHub release
+# → (optional) deploy to an existing VPS over SSH and verify it
+# → (optional) provision a brand-new OCI host with Terraform
+#
+# Secrets, all optional — jobs skip themselves cleanly when unset:
+#   DEPLOY_HOST      ubuntu@1.2.3.4
+#   DEPLOY_SSH_KEY   private key, no passphrase
+#   DEPLOY_DOMAIN    llm.example.com
+#   DEPLOY_EMAIL     ops@example.com
+#   DEPLOY_MODELS    space-separated model list
+#   DEPLOY_AUTH      admin:password
+#   TF_VAR_*         tenancy_ocid, compartment_ocid, region, domain, acme_email, auth_pass
+#
+# Note: the `secrets` context is not available in `if:` expressions, so each
+# optional job checks its own inputs at runtime and no-ops when they are absent.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy to DEPLOY_HOST after packaging"
+        type: boolean
+        default: false
+      provision:
+        description: "Provision a new host with Terraform (needs TF_VAR_* secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build the upload-ready artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      artifact: ${{ steps.meta.outputs.artifact }}
+      basename: ${{ steps.meta.outputs.basename }}
+      sha256: ${{ steps.meta.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dev dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Full suite (UI, gateway, deployment layer)
+        run: npm test
+
+      - name: Package
+        run: bash deploy/package.sh --out dist
+
+      - id: meta
+        name: Record artifact metadata
+        run: |
+          A=$(ls dist/grid-os-sovereign-*.tar.gz | head -1)
+          echo "artifact=$A" >> "$GITHUB_OUTPUT"
+          echo "basename=$(basename "$A")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$A" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grid-os-sovereign
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/manifest.json
+            dist/INSTALL.txt
+
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/grid-os-sovereign-*.tar.gz dist/*.sha256 dist/manifest.json \
+            --title "GRiD-OS-SOVEREIGN ${GITHUB_REF_NAME}" \
+            --notes "Self-installing artifact.
+
+          sha256 \`${{ steps.meta.outputs.sha256 }}\`
+
+          ### Upload and install
+          \`\`\`sh
+          scp ${{ steps.meta.outputs.basename }} ubuntu@YOUR_HOST:/tmp/
+          ssh ubuntu@YOUR_HOST 'cd /tmp && sha256sum -c ${{ steps.meta.outputs.basename }}.sha256 \\
+            && tar -xzf ${{ steps.meta.outputs.basename }} && cd grid-os-sovereign-* \\
+            && sudo bash deploy/install.sh --source . --domain llm.example.com \\
+                 --auth admin:CHANGE_ME --yes'
+          \`\`\`
+
+          ### Or install without uploading
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/deploy/install.sh \\
+            | sudo bash -s -- --domain llm.example.com --email you@example.com --auth admin:CHANGE_ME
+          \`\`\`
+
+          ### Verify
+          \`\`\`sh
+          bash deploy/verify.sh --url https://llm.example.com --public-host <ip> --expect-models --auth admin:CHANGE_ME
+          \`\`\`"
+
+  deploy:
+    name: Deploy to an existing host
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        name: Is a deploy target configured?
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -z "$HOST" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "DEPLOY_HOST is not set — packaging only."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "deploying to $HOST"
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          name: grid-os-sovereign
+          path: dist
+
+      - name: Upload, install, and restart services
+        if: steps.check.outputs.configured == 'true'
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
+          EMAIL: ${{ secrets.DEPLOY_EMAIL }}
+          MODELS: ${{ secrets.DEPLOY_MODELS }}
+          AUTH: ${{ secrets.DEPLOY_AUTH }}
+        run: |
+          set -euo pipefail
+          [ -n "$SSH_KEY" ] || { echo "DEPLOY_SSH_KEY missing"; exit 1; }
+          mkdir -p ~/.ssh && printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${HOST#*@}" >> ~/.ssh/known_hosts 2>/dev/null
+          SSH=(ssh -i ~/.ssh/id_deploy -o BatchMode=yes)
+          SCP=(scp -i ~/.ssh/id_deploy -o BatchMode=yes)
+
+          MODEL_ARGS=""
+          for m in ${MODELS:-qwen2.5:14b-instruct-q4_K_M}; do MODEL_ARGS="$MODEL_ARGS --model $m"; done
+
+          "${SSH[@]}" "$HOST" 'rm -rf /tmp/grid-deploy && mkdir -p /tmp/grid-deploy'
+          "${SCP[@]}" dist/grid-os-sovereign-*.tar.gz dist/*.sha256 "$HOST:/tmp/grid-deploy/"
+
+          "${SSH[@]}" "$HOST" "set -e
+            cd /tmp/grid-deploy
+            sha256sum -c *.sha256
+            tar -xzf grid-os-sovereign-*.tar.gz
+            cd grid-os-sovereign-*/
+            sudo bash deploy/install.sh --source . --yes \
+              ${DOMAIN:+--domain $DOMAIN} ${EMAIL:+--email $EMAIL} ${AUTH:+--auth $AUTH} $MODEL_ARGS"
+
+      - name: Verify the deployed host from the runner
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
+          AUTH: ${{ secrets.DEPLOY_AUTH }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -uo pipefail
+          if [ -z "$DOMAIN" ]; then
+            echo "No DEPLOY_DOMAIN — verifying the app tier on the host instead."
+            ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$HOST" \
+              'curl -fsS http://127.0.0.1:8080/healthz'
+            exit 0
+          fi
+          IP=$(getent hosts "$DOMAIN" | awk '{print $1; exit}')
+          bash deploy/verify.sh --url "https://${DOMAIN}" \
+            ${AUTH:+--auth "$AUTH"} ${IP:+--public-host "$IP"} --expect-models
+
+  provision:
+    name: Provision a new OCI host
+    needs: package
+    if: github.event_name == 'workflow_dispatch' && inputs.provision
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production
+    defaults:
+      run:
+        working-directory: oci/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Apply
+        env:
+          TF_VAR_tenancy_ocid: ${{ secrets.TF_VAR_tenancy_ocid }}
+          TF_VAR_compartment_ocid: ${{ secrets.TF_VAR_compartment_ocid }}
+          TF_VAR_region: ${{ secrets.TF_VAR_region }}
+          TF_VAR_domain: ${{ secrets.TF_VAR_domain }}
+          TF_VAR_acme_email: ${{ secrets.TF_VAR_acme_email }}
+          TF_VAR_auth_pass: ${{ secrets.TF_VAR_auth_pass }}
+          TF_VAR_admin_cidrs: ${{ secrets.TF_VAR_admin_cidrs }}
+          OCI_CONFIG_FILE: ${{ secrets.OCI_CONFIG_FILE }}
+        run: |
+          if [ -z "${TF_VAR_tenancy_ocid:-}" ]; then
+            echo "TF_VAR_tenancy_ocid is not set — skipping provisioning."
+            exit 0
+          fi
+          terraform apply -auto-approve -input=false
+
+      - name: Outputs
+        run: terraform output || true

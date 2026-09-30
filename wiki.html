@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wiki — GRiD-OS-SOVEREIGN</title>
+    <meta
+      name="description"
+      content="The KiNETiC-Ai wiki: organised knowledge shared by every vertical and every app, with immutable revisions, backlinks, review dates, and a mirror back to SharePoint. Nothing here is illustrative — it renders what the platform actually holds."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/css/grid-os.css" />
+    <script src="assets/js/brand.js"></script>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090b10'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23c8ff3d'/%3E%3C/svg%3E"
+    />
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner wrap">
+        <a class="brand" href="index.html" data-brand-aria="{name} — home"><span class="brand__mark" data-brand-mark></span> <span data-brand="name" class="brand__full">GRiD-OS-SOVEREIGN</span><span data-brand="compact" class="brand__compact">GRiD-OS</span></a>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html#product">Product</a>
+          <a href="index.html#architecture">Architecture</a>
+          <a href="index.html#models">Models</a>
+          <a href="lab.html">Behaviour Lab</a>
+          <a href="wiki.html" aria-current="page">Wiki</a>
+          <a href="DESIGN.md">Design system</a>
+        </nav>
+        <div class="grow"></div>
+        <span class="tag tag--accent" id="platformTag"><span class="dot"></span>PLATFORM · KiNETiC-Ai</span>
+        <a class="btn btn--ghost btn--sm" href="app.html">Open workspace</a>
+      </div>
+    </header>
+
+    <main class="wiki wrap">
+      <!-- ------------------------------------------------------------ left -->
+      <aside class="wiki__side">
+        <section class="card wiki__card" id="stateCard" aria-live="polite">
+          <h2 class="wiki__h">Platform</h2>
+          <p class="wiki__state" id="stateLine" data-state="unknown">Checking…</p>
+          <dl class="wiki__facts" id="stateFacts"></dl>
+          <div class="wiki__keybox" id="keyBox">
+            <label class="wiki__label" for="apiKey">API key</label>
+            <input id="apiKey" class="wiki__input" type="password" placeholder="ka_…" autocomplete="off" spellcheck="false" />
+            <p class="wiki__hint" id="keyHint">
+              Keys are issued by whoever operates the platform
+              (<span class="mono">node platform/server.mjs --create-key …</span>). The secret is shown once and only its
+              hash is stored.
+            </p>
+            <div class="wiki__row">
+              <button class="btn btn--sm" id="connectBtn" type="button">Connect</button>
+              <button class="btn btn--ghost btn--sm" id="forgetBtn" type="button">Forget key</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card wiki__card">
+          <h2 class="wiki__h">Search</h2>
+          <div class="wiki__row">
+            <input id="wikiSearch" class="wiki__input" type="search" placeholder="Title, tag or body…" aria-label="Search the wiki" />
+            <button class="btn btn--sm" id="searchBtn" type="button">Find</button>
+          </div>
+          <div class="wiki__row" style="margin-top:10px">
+            <button class="btn btn--ghost btn--sm" id="askBtn" type="button" title="Runs a hybrid RAG search and shows the citations">Ask the index</button>
+            <button class="btn btn--ghost btn--sm" id="newBtn" type="button">New page</button>
+          </div>
+          <p class="wiki__hint">Search scores title, slug, tags and body. “Ask the index” runs the same retrieval the
+            workspace uses and shows citations with their tier.</p>
+        </section>
+
+        <section class="card wiki__card">
+          <h2 class="wiki__h">Verticals</h2>
+          <ul class="wiki__vlist" id="verticalList"></ul>
+          <p class="wiki__hint" id="verticalHint"></p>
+        </section>
+
+        <section class="card wiki__card">
+          <h2 class="wiki__h">Reviews due</h2>
+          <ul class="wiki__reviews" id="reviewList"></ul>
+          <p class="wiki__hint">A page past its review date is surfaced here rather than quietly trusted.</p>
+        </section>
+      </aside>
+
+      <!-- ------------------------------------------------------------ main -->
+      <section class="wiki__main">
+        <!-- offline / no key -->
+        <div class="card wiki__panel" id="offlinePanel" hidden>
+          <h1 class="wiki__title">The wiki renders what the platform holds.</h1>
+          <p class="wiki__lede" id="offlineLede"></p>
+          <pre class="wiki__code" id="offlineCmd"></pre>
+          <p class="wiki__hint">
+            This page contains no sample content on purpose. A wiki that shows placeholder pages when the platform is
+            down would be the same mistake as a retrieval score that is illustrative rather than measured.
+          </p>
+          <h2 class="wiki__h" style="margin-top:22px">What this is</h2>
+          <ul class="wiki__bullets">
+            <li>Every page is indexed into RAG, so it is citable in an answer alongside contracts and policies.</li>
+            <li>Revisions are immutable: an edit creates revision N+1, the old text stays readable, and the diff is shown.</li>
+            <li>Links (<span class="mono">[[slug]]</span>, <span class="mono">[text](wiki:slug)</span> or a bare
+              <span class="mono">/wiki/slug</span>) build a backlink graph in both directions.</li>
+            <li>Pages are mirrored back out to SharePoint, so nothing exists only in this system.</li>
+            <li>Each page can carry a review date; overdue reviews appear in the queue on the left.</li>
+          </ul>
+        </div>
+
+        <!-- page list -->
+        <div class="card wiki__panel" id="listPanel" hidden>
+          <div class="wiki__panelhead">
+            <h1 class="wiki__title" id="listTitle">All pages</h1>
+            <span class="tag" id="listCount">0 pages</span>
+          </div>
+          <ul class="wiki__pages" id="pageList"></ul>
+        </div>
+
+        <!-- search results -->
+        <div class="card wiki__panel" id="resultsPanel" hidden>
+          <div class="wiki__panelhead">
+            <h1 class="wiki__title" id="resultsTitle">Results</h1>
+            <button class="btn btn--ghost btn--sm" id="backFromResults" type="button">All pages</button>
+          </div>
+          <ul class="wiki__pages" id="resultList"></ul>
+          <div id="askPanel" hidden>
+            <h2 class="wiki__h" style="margin-top:20px">Citations</h2>
+            <ol class="wiki__cites" id="citeList"></ol>
+            <div class="wiki__coldbox" id="coldBox" hidden></div>
+            <p class="wiki__hint" id="askMetrics"></p>
+          </div>
+        </div>
+
+        <!-- page view -->
+        <article class="card wiki__panel" id="pagePanel" hidden>
+          <div class="wiki__panelhead">
+            <h1 class="wiki__title" id="pageTitle">—</h1>
+            <div class="wiki__row">
+              <button class="btn btn--ghost btn--sm" id="backBtn" type="button">All pages</button>
+              <button class="btn btn--sm" id="editBtn" type="button">Edit</button>
+              <button class="btn btn--ghost btn--sm" id="historyBtn" type="button">History</button>
+              <button class="btn btn--ghost btn--sm" id="mirrorBtn" type="button">Mirror to SharePoint</button>
+            </div>
+          </div>
+          <p class="wiki__meta" id="pageMeta"></p>
+          <div class="wiki__body" id="pageBody"></div>
+          <div class="wiki__backlinks" id="backlinks" hidden>
+            <h2 class="wiki__h">Linked from</h2>
+            <ul class="wiki__tags" id="backlinkList"></ul>
+          </div>
+          <div class="wiki__mirror" id="pageMirror"></div>
+        </article>
+
+        <!-- editor -->
+        <div class="card wiki__panel" id="editorPanel" hidden>
+          <div class="wiki__panelhead">
+            <h1 class="wiki__title" id="editorTitle">Edit page</h1>
+            <div class="wiki__row">
+              <button class="btn btn--primary btn--sm" id="saveBtn" type="button">Save revision</button>
+              <button class="btn btn--ghost btn--sm" id="cancelBtn" type="button">Cancel</button>
+            </div>
+          </div>
+          <div class="wiki__form" id="newFields" hidden>
+            <div class="wiki__field">
+              <label class="wiki__label" for="newTitle">Title</label>
+              <input id="newTitle" class="wiki__input" type="text" placeholder="Billing cadence" />
+            </div>
+            <div class="wiki__field">
+              <label class="wiki__label" for="newVertical">Vertical</label>
+              <select id="newVertical" class="wiki__input"></select>
+            </div>
+          </div>
+          <div class="wiki__field">
+            <label class="wiki__label" for="bodyInput">Body (Markdown)</label>
+            <textarea id="bodyInput" class="wiki__textarea" rows="18" spellcheck="false"></textarea>
+          </div>
+          <div class="wiki__grid2">
+            <div class="wiki__field">
+              <label class="wiki__label" for="noteInput">Revision note</label>
+              <input id="noteInput" class="wiki__input" type="text" placeholder="what changed, and why" />
+            </div>
+            <div class="wiki__field">
+              <label class="wiki__label" for="authorInput">Author</label>
+              <input id="authorInput" class="wiki__input" type="text" placeholder="alice" />
+            </div>
+            <div class="wiki__field">
+              <label class="wiki__label" for="reviewInput">Review by</label>
+              <input id="reviewInput" class="wiki__input" type="date" />
+            </div>
+            <div class="wiki__field">
+              <label class="wiki__label" for="tagsInput">Tags (comma separated)</label>
+              <input id="tagsInput" class="wiki__input" type="text" placeholder="billing, cadence" />
+            </div>
+          </div>
+          <p class="wiki__hint" id="editorHint"></p>
+        </div>
+
+        <!-- history -->
+        <div class="card wiki__panel" id="historyPanel" hidden>
+          <div class="wiki__panelhead">
+            <h1 class="wiki__title" id="historyTitle">History</h1>
+            <button class="btn btn--ghost btn--sm" id="backFromHistory" type="button">Back to page</button>
+          </div>
+          <ul class="wiki__revs" id="revisionList"></ul>
+          <div class="wiki__diff" id="diffBox" hidden>
+            <h2 class="wiki__h" id="diffTitle">Diff</h2>
+            <div class="wiki__diffcols">
+              <div><h3 class="wiki__diffh wiki__diffh--rm">Removed</h3><pre class="code wiki__diffpre" id="diffRemoved"></pre></div>
+              <div><h3 class="wiki__diffh wiki__diffh--add">Added</h3><pre class="code wiki__diffpre" id="diffAdded"></pre></div>
+            </div>
+            <p class="wiki__hint" id="diffMeta"></p>
+          </div>
+        </div>
+
+        <p class="wiki__toast" id="toast" role="status" data-open="false"></p>
+      </section>
+
+      <!-- ------------------------------------------------------------ rail -->
+      <aside class="wiki__rail">
+        <section class="card wiki__card">
+          <h2 class="wiki__h">Live capacity</h2>
+          <div class="wiki__gauge"><span id="gaugeFill"></span></div>
+          <p class="wiki__gaugelabel" id="gaugeLabel">—</p>
+          <table class="wiki__table" id="quotaTable">
+            <thead><tr><th>Vertical</th><th class="num">Used</th><th class="num">Quota</th><th class="num">Window</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="wiki__hint" id="capacityHint"></p>
+        </section>
+
+        <section class="card wiki__card">
+          <h2 class="wiki__h">The 60-day rule</h2>
+          <p class="wiki__lede wiki__lede--sm" id="retentionLine">—</p>
+          <dl class="wiki__facts" id="retentionFacts"></dl>
+          <p class="wiki__hint">
+            Retrieval does not reset the clock — opening a document does. A demotion only happens after the SharePoint
+            mirror is verified, and an archived document stays discoverable with the way back in.
+          </p>
+        </section>
+
+        <section class="card wiki__card">
+          <h2 class="wiki__h">Mirror</h2>
+          <dl class="wiki__facts" id="mirrorFacts"></dl>
+          <div class="wiki__row">
+            <button class="btn btn--ghost btn--sm" id="syncBtn" type="button">Pull from SharePoint</button>
+            <button class="btn btn--ghost btn--sm" id="sweepBtn" type="button">Sweep (dry run)</button>
+          </div>
+          <p class="wiki__hint" id="mirrorHint">Admin scope required for sync and sweep.</p>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer__inner">
+        <p>
+          <span data-brand="legal">Private AI Ltd</span> · <span data-brand="year">2026</span> · Wiki served from the
+          KiNETiC-Ai platform over the same origin, so no cross-origin request and no third party sees your knowledge.
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/js/md.js"></script>
+    <script src="assets/js/wiki.js"></script>
+  </body>
+</html>

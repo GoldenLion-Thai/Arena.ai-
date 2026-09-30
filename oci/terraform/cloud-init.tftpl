@@ -1,0 +1,77 @@
+#cloud-config
+# Rendered by Terraform from oci/terraform/main.tf — do not edit by hand.
+# The bash-side variables are escaped as $${VAR} so Terraform leaves them alone.
+
+package_update: true
+packages: [curl, ca-certificates, jq, rsync]
+
+write_files:
+  - path: /etc/grid-os-sovereign.bootstrap.env
+    permissions: "0600"
+    content: |
+      DOMAIN="${domain}"
+      EMAIL="${email}"
+      MODELS="${models}"
+      AUTH="${auth}"
+      ALLOW="${allow}"
+      TLS="${tls}"
+      REPO="${repo}"
+      REF="${ref}"
+      KEEP_ALIVE="${keep_alive}"
+      MOUNT_MODEL_VOLUME="${model_volume ? "1" : "0"}"
+
+  - path: /usr/local/bin/grid-bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -uo pipefail
+      exec >>/var/log/grid-bootstrap.log 2>&1
+      echo "== GRiD-OS-SOVEREIGN bootstrap $(date -Is)"
+
+      for _ in $(seq 1 60); do
+        curl -fsS --max-time 3 https://raw.githubusercontent.com >/dev/null 2>&1 && break
+        sleep 5
+      done
+
+      . /etc/grid-os-sovereign.bootstrap.env
+
+      ARGS=(--yes)
+      [[ -n "$${DOMAIN:-}" ]] && ARGS+=(--domain "$DOMAIN")
+      [[ -n "$${EMAIL:-}" ]]  && ARGS+=(--email "$EMAIL")
+      [[ -n "$${TLS:-}" ]]    && ARGS+=(--tls "$TLS")
+      [[ -n "$${AUTH:-}" ]]   && ARGS+=(--auth "$AUTH")
+      [[ -n "$${KEEP_ALIVE:-}" ]] && ARGS+=(--keep-alive "$KEEP_ALIVE")
+      for m in $${MODELS:-}; do ARGS+=(--model "$m"); done
+      for c in $${ALLOW:-}; do ARGS+=(--allow "$c"); done
+
+      if [[ "$${MOUNT_MODEL_VOLUME:-0}" == "1" ]]; then
+        for _ in $(seq 1 30); do
+          DEV="$(lsblk -dnpo NAME,TYPE | awk '$2=="disk" && $1!~/(sda|nvme0n1|xvda)$$/ {print $1; exit}')"
+          [[ -n "$${DEV:-}" ]] && break
+          sleep 5
+        done
+        if [[ -n "$${DEV:-}" ]]; then
+          echo "== mounting $${DEV} at /var/lib/ollama/models"
+          blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -q -F "$DEV"
+          mkdir -p /var/lib/ollama/models
+          mount "$DEV" /var/lib/ollama/models 2>/dev/null || true
+          UUID="$(blkid -s UUID -o value "$DEV" 2>/dev/null || true)"
+          [[ -n "$UUID" ]] && echo "UUID=$UUID /var/lib/ollama/models ext4 defaults,nofail 0 2" >> /etc/fstab
+        else
+          echo "== no extra volume appeared; weights go on the boot volume"
+        fi
+      fi
+
+      curl -fsSL "https://raw.githubusercontent.com/$${REPO}/$${REF}/deploy/install.sh" -o /tmp/grid-install.sh \
+        || { echo "== cannot reach raw.githubusercontent.com — egress blocked?"; exit 1; }
+
+      bash /tmp/grid-install.sh \
+        --source "https://github.com/$${REPO}/archive/refs/heads/$${REF}.tar.gz" \
+        "$${ARGS[@]}"
+
+      echo "== bootstrap finished $(date -Is)"
+
+runcmd:
+  - /usr/local/bin/grid-bootstrap.sh
+
+final_message: "GRiD-OS-SOVEREIGN bootstrap finished after $UPTIME seconds"
