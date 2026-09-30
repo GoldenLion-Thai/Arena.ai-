@@ -226,33 +226,56 @@ it is not needed. Prefer explicit records for the subdomains you actually use.
 
 ---
 
-## 3. `asci-vps-2` ⬜ NOT YET REACHED
+## 3. `asci-vps-2` ⬜ NOT YET LOCATED — **OCI Always Free**
+
+> **Corrected 2026-09-15.** Previously recorded as Hostinger in a separate account. The
+> operator confirmed it is an **Oracle Cloud Always Free** instance.
 
 | Field | Value |
 |---|---|
-| Provider | Hostinger — **in a separate account of its own** |
-| Plan | ⬜ unknown |
+| Provider | **Oracle Cloud Infrastructure** |
+| Tier | Always Free ("free forever") |
+| Plan | ⬜ unknown — expect `VM.Standard.E2.1.Micro` |
+| Region | ⬜ **unknown** — most likely cause it is invisible |
+| Compartment | ⬜ unknown |
 | Public IP | ⬜ **UNKNOWN** |
-| SSH user | ⬜ likely `root` |
+| SSH user | `ubuntu` (OCI default — **not** `root`) |
 | OS | ⬜ unknown |
 
-**Why it's unreachable from here:** the OCI Cloud Shell is bound to the OCI tenancy and
-cannot enumerate another provider's account. Finding it means logging into that other
-Hostinger account (hPanel → VPS → Overview shows the public IP) or connecting directly to
-its IP from a machine holding its key.
+**Why it's invisible:** the OCI console lists one region and one compartment at a time. An
+Always Free instance created in another region simply does not appear. This is the single
+most likely explanation, and it is cheap to test:
+
+```bash
+bash scripts/oci-find-instances.sh
+```
+
+That sweeps every subscribed region and every compartment and prints a table of everything
+it finds. Add `INCLUDE_VOLUMES=1` to also total boot-volume storage against the 200 GB
+Always Free allowance.
 
 ---
 
-## 4. `asci-vps-3` ⬜ NOT YET CONFIRMED TO EXIST
+## 4. `asci-vps-3` ⬜ NOT YET LOCATED — **OCI Always Free**
+
+> **Corrected 2026-09-15.** Previously "unconfirmed to exist". The operator confirmed it is
+> an **Oracle Cloud Always Free** instance.
 
 | Field | Value |
 |---|---|
-| Provider | ⬜ unknown |
-| Plan | ⬜ unknown |
+| Provider | **Oracle Cloud Infrastructure** |
+| Tier | Always Free ("free forever") |
+| Plan | ⬜ unknown — expect `VM.Standard.E2.1.Micro` |
+| Region | ⬜ **unknown** |
 | Public IP | ⬜ **UNKNOWN** |
-| SSH user | ⬜ unknown |
+| SSH user | `ubuntu` (OCI default) |
+| OS | ⬜ unknown |
 
-Do not add this host to monitoring, Terminus or DNS until confirmed. A placeholder entry is
+⚠️ **Likely STOPPED.** A stopped OCI instance has no public IP until it is started, so it
+can be present in the tenancy and still show `-` in a sweep. If `oci-find-instances.sh`
+finds it in `STOPPED` state, start it, then re-run to read its IP.
+
+Do not add it to monitoring, Terminus or DNS until its IP is observed. A placeholder is
 fine; an invented IP is not.
 
 ---

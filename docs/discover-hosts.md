@@ -11,55 +11,44 @@ recovery procedures — will quietly trust it.
 
 ## 1. Where each host is believed to be
 
-| Host | Believed location | Blocker |
+> **Corrected 2026-09-15.** Both were previously assumed to be Hostinger in a separate
+> account. The operator has confirmed both are **Oracle Cloud Always Free** instances.
+> The Hostinger route below is kept only as a fallback.
+
+| Host | Location | Why it is invisible |
 |---|---|---|
-| `asci-vps-2` | Hostinger, **in a separate account of its own** | The OCI Cloud Shell cannot enumerate another provider's account |
-| `asci-vps-3` | Unknown — possibly Hostinger, possibly elsewhere, possibly nonexistent | Nothing on record at all |
+| `asci-vps-2` | **Oracle Cloud**, Always Free | The OCI console shows one **region** and one **compartment** at a time — an instance in another region never appears |
+| `asci-vps-3` | **Oracle Cloud**, Always Free | Same, and it may additionally be **STOPPED**, in which case it has no public IP at all |
+
+### The one command to run first
+
+From OCI Cloud Shell:
+
+```bash
+bash scripts/oci-find-instances.sh
+```
+
+It lists every subscribed region, every compartment, and every instance in each — with
+region, state, shape, public IP, availability domain and creation date. Add
+`INCLUDE_VOLUMES=1` to also total boot volumes against the 200 GB Always Free allowance.
+
+Expect one of three outcomes:
+
+| Outcome | What it means | Next step |
+|---|---|---|
+| Both listed, with IPs | Found | `merc probe <IP>`, then add to the inventory |
+| Listed but IP shows `-` | Present but **STOPPED** | Start the instance, re-run to read the IP |
+| Not listed | They are in a **different OCI tenancy** | Sign in with that account's credentials and sweep again |
+
+### If they are in another OCI tenancy
+
+Log into OCI with the other account's credentials, open Cloud Shell there, and run the same
+sweep. The script reads the tenancy from `TENANCY_OCID`, or derives it from the current
+session if unset.
 
 ---
 
-## 2. Finding `asci-vps-2` — the direct route
-
-Log into **each Hostinger account you hold** (not just the one that owns `asci-vps-1`) and:
-
-1. **hPanel → VPS → your server → Overview** — the public IPv4 is on this page.
-2. Note also: plan, datacentre location, OS, and the renewal date.
-
-If you have more than one Hostinger account, check them all. The account list is the whole
-search space here.
-
-### Verifying you have the right machine
-
-Before adding it, confirm it is actually yours — a wrong IP added to the inventory will be
-trusted by everything downstream.
-
-```bash
-merc probe <IP>
-```
-
-Returns the SSH banner, a best-guess distro from that banner, reverse DNS, and which common
-ports are open. Cross-check against what you expect:
-
-| Expectation | What to look for |
-|---|---|
-| Ubuntu | banner mentions `Ubuntu` or `Debian` |
-| Docker host | ports like `8000`, `8080`, `9000`, `9001`, `3000`, `5678` |
-| A mail host | `25`, `465`, `587`, `993`, `995`, `4190` |
-| This estate | a hostname resembling `asci-vps-2`, or Tailscale present |
-
-⚠️ **Run `merc probe` from Cloud Shell or your own PC, not from a sandbox or CI runner.**
-Behind an egress proxy every port appears open and the result is meaningless.
-
-### Then confirm by logging in
-
-```bash
-ssh -i ~/.ssh/<its-key> root@<IP>
-```
-
-Once the hostname, OS and user are confirmed, add the row to `fleet/inventory.conf` and
-give it a section in `SOT-fleet-inventory.md`.
-
----
+## 1b. Fallback: the Hostinger route (only if the sweep finds nothing)
 
 ### Public recon has already been tried — here is what it established
 

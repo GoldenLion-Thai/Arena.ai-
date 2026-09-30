@@ -100,8 +100,8 @@ Then `sudo sshd -t && sudo systemctl reload ssh`, and **verify**:
 
 | # | Task |
 |---|---|
-| 15 | **Find `asci-vps-2`** — separate Hostinger account; hPanel → VPS → Overview shows its IP |
-| 16 | **Confirm `asci-vps-3` exists** before adding it to anything |
+| 15 | **Locate `asci-vps-2`** — OCI Always Free, likely just in another region. Run `bash scripts/oci-find-instances.sh` in Cloud Shell |
+| 16 | **Locate `asci-vps-3`** — same sweep. If it shows `STOPPED`, start it; a stopped instance has no public IP |
 | 17 | Record the `asci-vps-1` SSH host key fingerprint |
 | 18 | Identify listening ports `37789` and `20241` on `asci-vps-1` |
 | 19 | Decide on swap: `kami-vps-1` has **0 Gi**, `asci-vps-1` has 4 Gi — make it consistent deliberately |

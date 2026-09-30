@@ -305,3 +305,32 @@ this method has run out.
 
 **Standing method note:** when raw network access is blocked, look for the HTTP-reachable
 research APIs. They are a different path to the same answer.
+
+---
+
+## 2026-09-15 04:00 — asci-vps-2 and asci-vps-3 were OCI all along
+
+Both had been recorded as Hostinger in a separate account. The operator corrected this:
+they are **Oracle Cloud Always Free** instances.
+
+**Why they were invisible:** the OCI console lists one region and one compartment at a
+time. An Always Free instance spun up in another region never shows in the list the operator
+was looking at — the page said "3 of 3 total items" and was telling the truth about that
+region only. An instance can also be STOPPED, in which case it has **no public IP** at all
+until started, so it looks absent even when found.
+
+**Lesson:** a console that says "showing all N items" means all items *in the current
+scope*. Region and compartment are scope. When something is genuinely missing, suspect the
+scope before suspecting the thing does not exist.
+
+**Second lesson:** I had written the Hostinger assumption into three documents as settled
+fact, and it was wrong. Assumptions that get repeated across files harden — the inventory,
+the SOT and the discovery runbook all said Hostinger, which made the error look
+corroborated. Record inferences as inferences until confirmed.
+
+Built `scripts/oci-find-instances.sh` to sweep every subscribed region and compartment.
+Two bugs caught only by running it against a stubbed `oci` on PATH:
+1. `--raw-output` on a JMESPath **hash** gives unpredictable field order. Fixed by using
+   an explicit list projection `[...]`, which guarantees order.
+2. Reading fields in the wrong order made bash do arithmetic on a hostname
+   (`asci: unbound variable`). Now the size field is validated as numeric before use.
