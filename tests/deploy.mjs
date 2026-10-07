@@ -290,6 +290,53 @@ const proxiedHz = await fetchText(`${LOCAL_URL}/platform/healthz`, 3000);
 ok("the app origin proxies /platform/* to the data tier", proxiedHz.status === 200 && /"platform":"KiNETiC-Ai"/.test(proxiedHz.body || ""), JSON.stringify(proxiedHz).slice(0, 160));
 const proxiedMeta = await fetchText(`${LOCAL_URL}/platform/v1/meta`, 3000);
 ok("a scoped platform route through the proxy demands a key", proxiedMeta.status === 401, `HTTP ${proxiedMeta.status}`);
+
+/* A proxy has one job: make the upstream see the same request the client sent.
+   Every filter this API has is a query parameter — ?vertical=, ?tier=, ?days=,
+   ?q=, ?limit= — so a proxy that mangles the query does not fail loudly. It
+   returns HTTP 200 and an empty list, the demo looks broken, and every unit
+   test still passes because none of them sent a "?" through the proxy. So each
+   of these sends the same request twice: once straight to the platform, once
+   through the app origin, and compares what came back. */
+const DIRECT_PLATFORM = `http://127.0.0.1:${LOCAL_PLATFORM_PORT}`;
+const demoAuth = demoKey ? { authorization: `Bearer ${demoKey}` } : null;
+const directAndProxied = async (path) => ({
+  direct: await fetchText(`${DIRECT_PLATFORM}${path}`, 5000, demoAuth),
+  via: await fetchText(`${LOCAL_URL}/platform${path}`, 5000, demoAuth),
+});
+const count = (body) => Number(((body || "").match(/"count":(\d+)/) || [0, -1])[1]);
+
+const qPages = await directAndProxied("/v1/wiki/pages?vertical=compliance");
+ok("the proxy forwards a query string exactly once",
+  qPages.direct.status === 200 && qPages.via.status === 200 && qPages.direct.body === qPages.via.body,
+  `direct ${qPages.direct.status} ${(qPages.direct.body || "").slice(0, 80)} | proxy ${qPages.via.status} ${(qPages.via.body || "").slice(0, 80)}`);
+const viaPages = JSON.parse(qPages.via.body || "{}").pages || [];
+ok("a vertical filter still filters when it arrives through the app origin",
+  viaPages.length === 1 && viaPages.every((p) => p.vertical === "compliance") && viaPages[0].slug === "compliance/retention-and-the-60-day-rule",
+  JSON.stringify(viaPages.map((p) => p.slug)));
+
+const qReviews = await directAndProxied("/v1/wiki/reviews?days=120");
+ok("the seeded overdue review is visible through the app origin",
+  qReviews.via.status === 200 && count(qReviews.via.body) === count(qReviews.direct.body) && /"overdue":true/.test(qReviews.via.body || ""),
+  (qReviews.via.body || "").slice(0, 150));
+ok("?days= arrives as a number, not as '120?days=120'",
+  /"daysUntilDue":-?\d+[,\}]/.test(qReviews.via.body || "") && !/\?/.test((qReviews.via.body || "").replace(/https?:\/\/[^"]*/g, "")),
+  (qReviews.via.body || "").slice(0, 150));
+
+const qWikiSearch = await directAndProxied("/v1/wiki/search?q=retention&limit=2");
+ok("wiki search through the proxy finds what a direct search finds",
+  qWikiSearch.via.status === 200 && count(qWikiSearch.via.body) === count(qWikiSearch.direct.body) && count(qWikiSearch.via.body) >= 1,
+  `direct ${count(qWikiSearch.direct.body)} | proxy ${count(qWikiSearch.via.body)} ${(qWikiSearch.via.body || "").slice(0, 100)}`);
+
+const qDocs = await directAndProxied("/v1/documents?tier=cold");
+ok("the cold-tier filter works through the app origin",
+  qDocs.via.status === 200 && count(qDocs.via.body) === count(qDocs.direct.body) && count(qDocs.via.body) >= 1,
+  `direct ${count(qDocs.direct.body)} | proxy ${count(qDocs.via.body)}`);
+
+const qAudit = await directAndProxied("/v1/admin/audit?limit=3&action=key.created");
+ok("an admin route with two parameters works through the app origin",
+  qAudit.via.status === 200 && Array.isArray(JSON.parse(qAudit.via.body || "{}").entries) && JSON.parse(qAudit.via.body || "{}").entries.length <= 3,
+  (qAudit.via.body || "").slice(0, 130));
 const wikiPage = await fetchText(`${LOCAL_URL}/wiki.html`, 3000);
 ok("the wiki page is served by the app tier", wikiPage.status === 200 && /wiki/i.test(wikiPage.body || ""), `HTTP ${wikiPage.status}`);
 const platformStateWritten = existsSync(join(PLATFORM_DATA, "documents.jsonl")) || existsSync(join(PLATFORM_DATA, "state.jsonl"));
@@ -743,6 +790,8 @@ ok("AGENT-BRIEF.md keeps internal ports unpublished", /8090/.test(brief) && /114
 ok("AGENT-BRIEF.md lists the invariants that the tests pin", /setEmbedder/.test(brief) && /linkSlug/.test(brief) && /reviewBy/.test(brief) && /HashEmbedder/.test(brief));
 ok("AGENT-BRIEF.md warns about the vertical: principal form", /vertical:<id>/.test(brief));
 ok("AGENT-BRIEF.md warns about leftover processes holding ports", /pkill/.test(brief) && /old.{0,10}platform|401/i.test(brief));
+ok("AGENT-BRIEF.md warns that a proxied 200 with count: 0 can mean a mangled query string",
+  /query string/i.test(brief) && /count: 0/.test(brief) && /splitting path and query once/i.test(brief));
 ok("AGENT-BRIEF.md has a definition of done", /Definition of done/i.test(brief) && /ACCEPTANCE\.md/.test(brief));
 ok("AGENT-BRIEF.md tells the agent how to report back", /Reporting back/i.test(brief) && /BLOCKED ON OPERATOR/i.test(brief));
 ok("AGENT-BRIEF.md corrects the search parameter name rather than leaving a guess",

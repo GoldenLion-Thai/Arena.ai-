@@ -524,7 +524,7 @@ and the naming rationale are in §12.
 
 `npm test` runs four suites: two in jsdom with a real IndexedDB and WebCrypto shim, driving the
 actual UI rather than unit-testing helpers, one that exercises the data platform end to end, and one
-that treats the deployment layer as code. 1093 assertions:
+that treats the deployment layer as code. 1101 assertions:
 
 | Area | Asserted behaviour |
 | --- | --- |

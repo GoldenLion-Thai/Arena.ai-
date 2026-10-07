@@ -103,7 +103,16 @@ function proxy(req, res, opts = {}) {
   }
 
   // /gateway/api/chat  →  {target}/api/chat
-  const rest = req.url.slice(prefix.length - 1); // keep the leading slash
+  // Split the query off once, up front. req.url carries both halves, and the
+  // upstream path must be built from the path alone: appending "?a=1" to a
+  // `rest` that still contains "?a=1" sends "?a=1?a=1" upstream, where the
+  // second "?" is just more text inside the first parameter's value. The
+  // upstream then filters on "1?a=1" and quietly matches nothing — a 200 with an
+  // empty list, which is much harder to notice than a 400.
+  const qAt = req.url.indexOf("?");
+  const rawPath = qAt === -1 ? req.url : req.url.slice(0, qAt);
+  const query = qAt === -1 ? "" : req.url.slice(qAt);
+  const rest = rawPath.slice(prefix.length - 1); // keep the leading slash
   const upstreamPath = (target.pathname.replace(/\/$/, "") + rest) || "/";
 
   const lib = target.protocol === "https:" ? https : http;
@@ -120,7 +129,7 @@ function proxy(req, res, opts = {}) {
       hostname: target.hostname,
       port: target.port || (target.protocol === "https:" ? 443 : 80),
       method: req.method,
-      path: upstreamPath + (req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""),
+      path: upstreamPath + query,
       headers,
     },
     (up) => {

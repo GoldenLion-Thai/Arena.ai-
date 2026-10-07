@@ -18,7 +18,7 @@ npm test                                  # [auto] all four suites
 ```
 
 **Pass:** `npm test` ends with four summary lines and no failures. At handover the counts were
-**smoke 213 · gateway 50 · platform 308 · deploy 522 = 1093 passed, 0 failed** — record the numbers
+**smoke 213 · gateway 50 · platform 308 · deploy 530 = 1101 passed, 0 failed** — record the numbers
 you actually see; if they differ, something changed and you should know what.
 
 **Also confirm no runtime dependency was smuggled in:**

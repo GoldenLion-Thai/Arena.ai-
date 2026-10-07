@@ -31,7 +31,7 @@ Two separate questions, answered separately:
 | **Only live/production/useful data admitted** | ✅ | `platform/ingest.mjs` — minimum ~40 tokens, tier + vertical classification, rejection reasons returned | `tests/platform.mjs` |
 | **60 days unopened → back to SharePoint, re-openable** | ✅ | `platform/lifecycle.mjs` — retrieval does *not* reset the clock, opening *does*; 4.3 KB stub stays discoverable; rehydrate reports drift; window tightens 60→30→14 days at 90%/97% of quota | `tests/platform.mjs`; live demo shows a 61-day document in cold tier |
 | **Shared across all business verticals** | ✅ | vertical-scoped ACLs (`vertical:<id>` principals), default-deny public | `tests/platform.mjs` |
-| Deployment automation (bare metal, no Docker) | ✅ | `deploy/install.sh` (23 flags, `--dry-run`, `--render-only`), `deploy/verify.sh`, `deploy/package.sh` (byte-reproducible tarball), `deploy/cloud-init.yaml`, `deploy/Makefile` | `tests/deploy.mjs` (522 assertions) |
+| Deployment automation (bare metal, no Docker) | ✅ | `deploy/install.sh` (23 flags, `--dry-run`, `--render-only`), `deploy/verify.sh`, `deploy/package.sh` (byte-reproducible tarball), `deploy/cloud-init.yaml`, `deploy/Makefile` | `tests/deploy.mjs` (530 assertions) |
 | Local demo without a GPU or downloads | ✅ | `deploy/local.sh --mock --platform --fixtures` | ran green; demo key printed in the banner |
 | **Docker image (one Dockerfile, two roles)** | ✅ new | `Dockerfile`, `.dockerignore` | `tests/deploy.mjs` |
 | **Coolify install path (free forever, OSS, latest)** | ✅ new | `deploy/coolify/install-coolify.sh`, `deploy/coolify/docker-compose.yml` | `tests/deploy.mjs` + `--dry-run` exercised |

@@ -217,6 +217,15 @@ Two deliberate behaviours worth knowing before you "fix" them:
     `registry.ollama.ai` / `cdn.coollabs.io`. Do not report an install as failed because of that —
     report it as **not executable in this environment** and hand the operator the exact command.
 
+**Proxy trap:**
+17. `server.js` builds the upstream path from `req.url`, which still contains the query string.
+    Appending the query a second time sent `?days=120?days=120` upstream, so `Number("120?days=120")`
+    was `NaN` and every filtered route returned **HTTP 200 with an empty list** — the review queue
+    looked empty and `?vertical=` matched nothing, while direct calls to the platform were correct.
+    Fixed by splitting path and query once. **Test any proxy change with a query string in it**, and
+    compare the proxied response against a direct one: a 200 with `count: 0` is not evidence that
+    there is nothing to show.
+
 ## 7. Definition of done
 
 Run `handover/ACCEPTANCE.md` in full. You are done when:
