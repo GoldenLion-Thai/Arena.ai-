@@ -25,6 +25,9 @@ python3 -m http.server 8080 --bind 0.0.0.0
 | [`docs/DATA-PLATFORM.md`](docs/DATA-PLATFORM.md) | The data platform design: capacity arithmetic, admission policy, retrieval and citation contract, the 60-day rule, permissions, API surface, production schema, and what is not wired yet |
 | [`DESIGN.md`](DESIGN.md) | The design guide: principles, layout blueprint, tokens, storage model, picker UX, streaming rules, benchmark method, claim audit |
 | [`deploy/`](deploy/) | Deployment automation: `install.sh` (VPS installer), `local.sh` (one-command local run), `package.sh` (reproducible artifact), `verify.sh` (post-deploy proof), `Makefile`, nginx template, Ollama systemd drop-in, docker-compose, cloud-init, hardening checklist |
+| [`deploy/coolify/`](deploy/coolify/) | **Coolify** path (Apache-2.0, free forever on your own hardware): `install-coolify.sh` pre-flights the host and runs the official installer unattended, `docker-compose.yml` deploys the whole stack as one Coolify resource and gets you a public HTTPS URL |
+| [`Dockerfile`](Dockerfile) | One image, two roles — the app tier by default, the data platform via a command override. No `npm install`, non-root, real `HEALTHCHECK` |
+| [`handover/`](handover/) | The handover pack: `STATUS.md` (is it complete — honestly), `AGENT-BRIEF.md` (brief for an AI IDE such as Qoder.ai), `VPS-COOLIFY.md`, `WINDOWS-11.md`, `ACCEPTANCE.md` (prove it before you accept it) |
 | [`oci/terraform/`](oci/terraform/) | Fully automated infrastructure on Oracle Cloud: VCN, NSG (22/80/443 only), GPU or A1 Flex instance, separate model-weight volume, cloud-init that installs and verifies the product |
 | [`.github/workflows/`](.github/workflows/) | CI (tests + deployment harness + Terraform validate) and the release pipeline (artifact → GitHub release → optional SSH deploy → optional `terraform apply`) |
 
@@ -140,27 +143,40 @@ and has not met a real tenant. See [docs/DATA-PLATFORM.md](docs/DATA-PLATFORM.md
 
 ## Deploy it
 
-Four routes, fastest first. Full detail in [`deploy/README.md`](deploy/README.md).
+Five routes, fastest first. Full detail in [`deploy/README.md`](deploy/README.md); the operator
+handover pack — status, the Coolify walkthrough, the Windows 11 route and the acceptance checklist —
+is in [`handover/`](handover/).
 
 ```bash
 # 1 · FASTEST, local — installs Ollama if needed, pulls a model, opens the browser
 bash deploy/local.sh                          # real inference
 bash deploy/local.sh --mock                   # no Ollama? demo host, zero downloads
 
-# 2 · FASTEST, a VPS you already have — one command, idempotent, TLS + auth + firewall
+# 2 · COOLIFY ON A VPS — open source, free forever, and it gets you a public HTTPS URL
+sudo bash deploy/coolify/install-coolify.sh --check-only           # host + network checks
+sudo bash deploy/coolify/install-coolify.sh --dry-run              # rehearse, change nothing
+sudo bash deploy/coolify/install-coolify.sh --email ops@example.com --username kami
+#   → UI at http://<vps-ip>:8000 → New Resource → Docker Compose →
+#     deploy/coolify/docker-compose.yml → Deploy → open the URL from your laptop
+#   (handover/VPS-COOLIFY.md walks the domain, TLS, env vars and GPU cases)
+
+# 3 · A VPS WITHOUT DOCKER — one command, idempotent, TLS + auth + firewall
 curl -fsSL https://raw.githubusercontent.com/GoldenLion-Thai/Arena.ai-/main/deploy/install.sh \
   | sudo bash -s -- --domain llm.example.com --email ops@example.com \
                     --model qwen2.5:14b-instruct-q4_K_M --auth admin:CHANGE_ME
 bash deploy/install.sh --dry-run --domain llm.example.com      # review the plan first
 bash deploy/install.sh --render-only --domain llm.example.com  # review the nginx site
 
-# 3 · UPLOAD-READY ARTIFACT — reproducible, checksummed, for hosts without GitHub access
+# 4 · UPLOAD-READY ARTIFACT — reproducible, checksummed, for hosts without GitHub access
 bash deploy/package.sh                        # → dist/*.tar.gz + .sha256 + manifest.json + INSTALL.txt
 cd deploy && make deploy TARGET=ubuntu@1.2.3.4 DOMAIN=llm.example.com AUTH=admin:CHANGE_ME
 
-# 4 · FULLY AUTOMATED — provision the host itself on Oracle Cloud
+# 5 · FULLY AUTOMATED — provision the host itself on Oracle Cloud
 cd oci/terraform && terraform init && terraform apply
 ```
+
+Every container route uses the same root [`Dockerfile`](Dockerfile): one image, two roles, no
+`npm install`, non-root, and a `HEALTHCHECK` that really asks for `/healthz`.
 
 Every route ends with proof rather than assumption:
 
@@ -215,11 +231,12 @@ The product itself has no build step and no runtime dependencies. Tests are dev-
 
 ```bash
 npm install           # jsdom + fake-indexeddb + js-yaml (devDependencies only)
-npm test               # 873 assertions: UI + gateway + data platform + deployment layer
+npm test               # 1093 assertions: UI + gateway + data platform + deployment layer
 npm run test:smoke     # UI behaviour only, including the wiki          (213)
 npm run test:gateway   # mock Ollama + proxy + real streaming in the UI  (50)
 npm run test:platform  # the KiNETiC-Ai data platform end to end        (308)
-npm run test:deploy    # installer, packager, verifier, local.sh, make, cloud-init, terraform, CI (302)
+npm run test:deploy    # installer, packager, verifier, local.sh, make, cloud-init, terraform, CI,
+                       # Dockerfile, Coolify and the handover pack                    (522)
 npm run platform       # the data tier on :8090 (RAG + wiki + retention + mirror)
 npm run local:demo     # the whole thing — app + data tier + labelled sample content
 npm run mock          # mock inference host on :11500 for manual testing
@@ -261,7 +278,7 @@ bidirectional backlinks, review queue, indexed and mirrored out), the HTTP API (
 verticals, rate limits, audit), JSONL persistence across a restart, `/platform/*` reachable on the app
 origin, and parity between `platform/schema.sql` and the constants in `platform/config.mjs`.
 
-`tests/deploy.mjs` (302 assertions) treats the deployment layer as code, not prose: every script is
+`tests/deploy.mjs` (522 assertions) treats the deployment layer as code, not prose: every script is
 syntax-checked and executable; the installer's dry-run plan covers all nine steps (ten with
 `--platform`, which is checked for a loopback bind, a hardened unit, the embedding-model pull and the
 `PLATFORM_URL` it hands the app tier) and changes nothing
@@ -277,6 +294,20 @@ targets forward their variables correctly; `cloud-init.yaml` is parsed as YAML a
 of any ingress rule on 11434/8080, sensitive variables and cloud-init wiring; and both workflows are
 parsed, checked for the `secrets`-in-`if:` mistake GitHub Actions does not allow, and asserted to run
 the gates they claim.
+
+It also tests the container and handover layers: the root `Dockerfile` (pinned base, non-root user, a
+`HEALTHCHECK` that really probes `/healthz` and works for either role, no `npm install`, and every
+`COPY` source asserted to exist so a clean clone always builds); `.dockerignore` (keeping `.git`,
+`node_modules`, the proof layers and `.data/` out of the build context); `deploy/coolify/docker-compose.yml`
+(parsed as YAML, `SERVICE_URL_GRID_8080` present and valueless, build context `../..` resolved against
+the real filesystem, **no service publishing a port**, GPU block disabled by default, `pgvector`
+profile mounting a `schema.sql` path that is asserted to exist); `deploy/coolify/install-coolify.sh`
+(`bash -n`, strict mode, the official CDN paths and unattended variables, root refusal, sha256 of what
+it downloaded, no password via argv, documented exit codes — then really executed with `--help`,
+`--dry-run` and `--check-only`, accepting exit 0 or the designed exit 3 when the CDN is unreachable);
+and the six-document `handover/` pack, including a cross-check that every API route the handover
+brief documents is one the platform lists itself, and that neither the brief nor the acceptance
+checklist cites an endpoint or parameter that does not exist.
 
 Optional visual capture (needs a Chromium binary, writes to gitignored `shots/`):
 

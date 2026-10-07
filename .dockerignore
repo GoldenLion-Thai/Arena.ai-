@@ -1,0 +1,30 @@
+# Keep the image to the runtime surface. The Dockerfile COPYs explicit paths,
+# but the build context still has to be sent to the daemon — and the context
+# carries .git, node_modules and local state, which would be slow, large, and
+# in the case of .data/ a residency leak (it can hold real content hashes and
+# audit rows from a local run).
+.git
+.gitignore
+.github
+node_modules
+.data
+dist
+build
+out
+coverage
+*.log
+*.tgz
+
+# Proof and packaging, not runtime.
+tests
+deploy
+oci
+handover
+docs
+DESIGN.md
+README.md
+Dockerfile
+.dockerignore
+.env
+.env.*
+!.env.example

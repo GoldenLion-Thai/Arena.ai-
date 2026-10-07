@@ -547,6 +547,294 @@ ok("deploy/README no longer calls retrieval illustrative", !/RAG[^.]{0,60}illust
 ok("root README points at the data platform", /KiNETiC-Ai/.test(read("README.md")) && /platform\/server\.mjs|docs\/DATA-PLATFORM\.md/.test(read("README.md")));
 ok("DESIGN.md covers the data platform", /KiNETiC-Ai/.test(read("DESIGN.md")));
 
+// ====================================================== 13 · the container image
+section("Dockerfile — one image, two roles, no build step, no root");
+
+ok("Dockerfile exists at the repository root", exists("Dockerfile"));
+ok(".dockerignore exists alongside it", exists(".dockerignore"));
+const dockerfile = exists("Dockerfile") ? read("Dockerfile") : "";
+const dockerignore = exists(".dockerignore") ? read(".dockerignore") : "";
+
+ok("the base image is a pinned Node 22 alpine", /^FROM node:22-alpine$/m.test(dockerfile));
+ok("there is no npm install in the image — the runtime has zero dependencies", !/\bnpm (install|ci|i)\b/.test(dockerfile));
+ok("the image runs as a non-root user", /^USER grid$/m.test(dockerfile) && /adduser -S grid/.test(dockerfile));
+ok("the image declares a HEALTHCHECK", /^HEALTHCHECK /m.test(dockerfile));
+ok("the healthcheck probes /healthz instead of returning true", /\/healthz/.test(dockerfile) && !/CMD\s+(true|none)\b/.test(dockerfile));
+ok("the healthcheck works for either role (PLATFORM_PORT wins, else PORT)", /PLATFORM_PORT\|\|process\.env\.PORT/.test(dockerfile));
+ok("the image exposes the app tier port", /^EXPOSE 8080$/m.test(dockerfile));
+ok("the default command is the app tier", /^CMD \["node", "server\.js"\]$/m.test(dockerfile));
+ok("the platform role is a command override, not a second image", /node platform\/server\.mjs/.test(dockerfile));
+ok("the image sets the same-origin proxy prefixes by default", /GATEWAY_PREFIX=\/gateway\//.test(dockerfile) && /PLATFORM_PREFIX=\/platform\//.test(dockerfile));
+ok("a writable /data volume exists for the platform's store", /^VOLUME \["\/data"\]$/m.test(dockerfile));
+
+// Every COPY source must exist, or `docker build` fails on a clean clone.
+const copySources = [...dockerfile.matchAll(/^COPY\s+(.+?)\s+(?:\.\/|\S+)\s*$/gm)]
+  .flatMap((m) => m[1].split(/\s+/))
+  .filter((s) => !s.startsWith("--") && !s.startsWith("./") && s !== ".");
+ok("the Dockerfile COPYs the runtime surface", copySources.length >= 8, `found ${copySources.length}`);
+for (const src of copySources) ok(`COPY source exists in the repository: ${src}`, exists(src));
+ok("the image copies the platform code", copySources.includes("platform"));
+ok("the image copies all four surfaces in one line", /COPY index\.html app\.html lab\.html wiki\.html/.test(dockerfile));
+
+ok(".dockerignore keeps .git out of the build context", /^\.git$/m.test(dockerignore));
+ok(".dockerignore keeps node_modules out", /^node_modules$/m.test(dockerignore));
+ok(".dockerignore keeps local runtime state out", /^\.data$/m.test(dockerignore));
+ok(".dockerignore says why .data is excluded — it can hold real content hashes", /residency|content hashes|audit/i.test(dockerignore));
+ok(".dockerignore keeps proof and packaging out of the runtime image",
+  ["tests", "deploy", "handover", "docs", "oci"].every((d) => new RegExp(`^${d}$`, "m").test(dockerignore)));
+ok(".dockerignore keeps env files out", /^\.env$/m.test(dockerignore));
+
+// ============================================================ 14 · Coolify
+section("Coolify — the free-forever path from a VPS to a URL on your laptop");
+
+const COOLIFY_COMPOSE = "deploy/coolify/docker-compose.yml";
+const COOLIFY_INSTALL = "deploy/coolify/install-coolify.sh";
+ok(`${COOLIFY_COMPOSE} exists`, exists(COOLIFY_COMPOSE));
+ok(`${COOLIFY_INSTALL} exists`, exists(COOLIFY_INSTALL));
+
+const coolText = exists(COOLIFY_COMPOSE) ? read(COOLIFY_COMPOSE) : "";
+let coolDoc = null;
+try { coolDoc = yaml.load(coolText); } catch (e) { ok("the Coolify compose is valid YAML", false, e.message); }
+ok("the Coolify compose is valid YAML", !!coolDoc);
+
+if (coolDoc) {
+  const svcs = coolDoc.services || {};
+  for (const s of ["grid-os", "platform", "ollama", "model-pull", "postgres"]) ok(`the compose defines ${s}`, !!svcs[s]);
+
+  const gridEnv = (svcs["grid-os"]?.environment || []).map(String);
+  const magic = gridEnv.find((e) => /^SERVICE_(URL|FQDN)_/.test(e));
+  ok("grid-os declares a Coolify magic variable", !!magic, magic || "none found");
+  ok("the magic variable carries the app tier port", /_8080$/.test(magic || ""), String(magic));
+  ok("the magic variable is left valueless for Coolify to generate", magic ? !/=.+/.test(magic) : false);
+  ok("no other service declares a magic URL — only the app tier faces the internet",
+    Object.entries(svcs).filter(([n, s]) => n !== "grid-os" && (s.environment || []).map(String).some((e) => /^SERVICE_(URL|FQDN)_/.test(e))).length === 0);
+  ok("no service publishes a port; Coolify's proxy is the only way in",
+    Object.values(svcs).every((s) => !s.ports || s.ports.length === 0));
+  ok("no internal port is published anywhere in the file", !/"(8090|11434|5432):/.test(coolText));
+
+  const ctx = svcs["grid-os"]?.build?.context;
+  ok("grid-os builds from an explicit context", !!ctx, String(ctx));
+  const ctxResolved = join(dirname(join(ROOT, COOLIFY_COMPOSE)), String(ctx || ""));
+  ok(`the context "${ctx}" resolves to the repository root`, ctxResolved === ROOT, ctxResolved);
+  ok("the Dockerfile that context points at exists",
+    existsSync(join(ctxResolved, String(svcs["grid-os"]?.build?.dockerfile || "Dockerfile"))));
+  ok("the platform reuses the same image with a command override",
+    (svcs.platform?.command || []).join(" ") === "node platform/server.mjs");
+  ok("the platform persists to a named volume, not the container filesystem",
+    (svcs.platform?.volumes || []).some((v) => String(v).startsWith("platform-data:")));
+  ok("the platform binds inside the container network only",
+    (svcs.platform?.environment || []).map(String).includes("PLATFORM_HOST=0.0.0.0"));
+  ok("grid-os reaches the platform by compose DNS, never by host address",
+    gridEnv.includes("PLATFORM_URL=http://platform:8090"));
+  ok("grid-os reaches the model host by compose DNS", gridEnv.includes("OLLAMA_URL=http://ollama:11434"));
+  ok("grid-os waits for a healthy platform before starting",
+    svcs["grid-os"]?.depends_on?.platform?.condition === "service_healthy");
+  ok("grid-os and platform both carry a healthcheck", !!svcs["grid-os"]?.healthcheck && !!svcs.platform?.healthcheck);
+  ok("ollama keeps weights on a named volume so a redeploy does not re-download them",
+    (svcs.ollama?.volumes || []).some((v) => String(v).startsWith("ollama-models:")));
+  ok("ollama has a healthcheck", !!svcs.ollama?.healthcheck);
+  ok("the GPU block ships disabled so a CPU VPS can deploy at all", !svcs.ollama?.deploy,
+    "uncomment it only on a node with the NVIDIA container toolkit");
+  ok("model-pull is one-shot and cannot restart forever", svcs["model-pull"]?.restart === "no");
+  ok("model-pull fetches the embedding model that makes retrieval real",
+    /EMBED_MODEL/.test(JSON.stringify(svcs["model-pull"])) && /nomic-embed-text/.test(coolText));
+  ok("postgres is behind the pgvector profile", (svcs.postgres?.profiles || []).includes("pgvector"));
+  const schemaMount = (svcs.postgres?.volumes || []).map(String).find((v) => v.includes("schema.sql"));
+  ok("postgres applies platform/schema.sql on first boot", !!schemaMount, String(schemaMount));
+  if (schemaMount) {
+    ok("that schema mount path resolves to a real file",
+      existsSync(join(dirname(join(ROOT, COOLIFY_COMPOSE)), schemaMount.split(":")[0])), schemaMount.split(":")[0]);
+  }
+  ok("the database is tuned from the capacity plan rather than guessed",
+    /maintenance_work_mem=3GB/.test(coolText) && /shared_buffers=4GB/.test(coolText) && /max_connections=100/.test(coolText));
+  ok("the compose states the 50 GB per node / 20 GB live figures", /50 GB per node/.test(coolText) && /20 GB/.test(coolText));
+  ok("the compose is honest that DATABASE_URL is not read yet", /next piece of work|still persists/i.test(coolText));
+  ok("the compose explains how the public URL happens", /SERVICE_URL_GRID_8080/.test(coolText) && /Let's Encrypt/i.test(coolText));
+  ok("the compose tells the operator where secrets belong (Coolify env vars)", /Environment\s*\n?\s*Variables|Coolify \(Resource → Environment/i.test(coolText));
+}
+
+ok("install-coolify.sh is executable", exists(COOLIFY_INSTALL) && (statSync(join(ROOT, COOLIFY_INSTALL)).mode & 0o111) !== 0);
+const coolSyntax = sh("bash", ["-n", join(ROOT, COOLIFY_INSTALL)]);
+ok("install-coolify.sh passes bash -n", coolSyntax.code === 0, coolSyntax.out.slice(0, 160));
+const cool = exists(COOLIFY_INSTALL) ? read(COOLIFY_INSTALL) : "";
+ok("it runs under strict mode", /set -euo pipefail/.test(cool));
+// The CDN base is defined once and composed, so check the pieces, not one long literal.
+ok("it points at the OFFICIAL Coolify CDN rather than a fork", /^CDN="https:\/\/cdn\.coollabs\.io\/coolify"$/m.test(cool));
+ok("it installs from the CDN's install.sh", /INSTALLER="\$CDN\/install\.sh"/.test(cool));
+ok("it reads the CDN's versions.json to report the latest release", /VERSIONS_JSON="\$CDN\/versions\.json"/.test(cool) && /coolify-versions\.json/.test(cool));
+ok("it upgrades using Coolify's own upgrade.sh, preferring the installed copy",
+  /UPGRADE_SH="\$CDN\/upgrade\.sh"/.test(cool) && /COOLIFY_SOURCE="\/data\/coolify\/source"/.test(cool)
+  && /\$COOLIFY_SOURCE\/upgrade\.sh/.test(cool));
+ok("it passes the documented upgrade arguments (image, helper, registry, skip-backup)",
+  /latest latest '\$\{REGISTRY:-docker\.io\}' false/.test(cool));
+ok("it uses the installer's documented unattended variables",
+  ["ROOT_USERNAME", "ROOT_USER_EMAIL", "ROOT_USER_PASSWORD", "AUTOUPDATE", "REGISTRY_URL"].every((v) => cool.includes(v)));
+ok("it refuses to install as a non-root user", /id -u/.test(cool) && /must run as root/i.test(cool));
+ok("a rehearsal is allowed without root so it can be dry-run anywhere", /allowed without it/i.test(cool));
+ok("it checks the host before touching it (RAM, disk, ports, Docker, curl)",
+  ["MemTotal", "df -BG", "80 443", "docker", "curl"].every((t) => cool.includes(t)));
+ok("it knows Coolify's UI port and says so", /COOLIFY_UI_PORT=8000/.test(cool) && /:8000/.test(cool));
+ok("it shows what it downloaded before running it as root", /sha256sum/.test(cool) && /head -n1/.test(cool));
+ok("it refuses to execute a download that is not a script", /does not start with a shebang/i.test(cool));
+ok("it never accepts a password as a command-line value", !/--password\)/.test(cool) && /--password-file\)/.test(cool));
+ok("it explains why: argv is readable by other users on the host", /\/proc\/|shell history/i.test(cool));
+ok("it documents its exit codes", /Exit codes: 0 ok/.test(cool));
+ok("it fails loudly when the Coolify CDN is unreachable instead of hanging", /exit 3/.test(cool) && /cannot be installed offline/i.test(cool));
+ok("it ends by telling the operator how to reach the app from a laptop",
+  /Where to point your laptop/i.test(cool) && /deploy\/coolify\/docker-compose\.yml/.test(cool));
+ok("it offers --dry-run, --yes, --upgrade, --check-only and --no-autoupdate",
+  ["--dry-run", "--yes", "--upgrade", "--check-only", "--no-autoupdate"].every((f) => cool.includes(f)));
+
+const coolHelp = sh("bash", [join(ROOT, COOLIFY_INSTALL), "--help"]);
+ok("--help prints usage without touching the host", coolHelp.code === 0 && /install-coolify\.sh/.test(coolHelp.out));
+
+const coolDry = sh("bash", [join(ROOT, COOLIFY_INSTALL), "--dry-run", "--yes", "--email", "handover@example.test", "--username", "kami"], { timeout: 120000 });
+ok("a dry run exits 0 (nothing installed) or 3 (no egress to the Coolify CDN)",
+  coolDry.code === 0 || coolDry.code === 3, `exit ${coolDry.code}`);
+ok("the dry run reports its host checks", /1\/5\s+Host checks/.test(coolDry.out));
+ok("the dry run never executes the installer", !/\[run\]\s+env ROOT_/.test(coolDry.out));
+ok("the dry run either prints the command it would run or explains why it stopped",
+  /\[dry\]/.test(coolDry.out) || /cannot reach https:\/\/cdn\.coollabs\.io/.test(coolDry.out));
+ok("the dry run names the compose location the operator enters in Coolify (when it gets that far)",
+  /deploy\/coolify\/docker-compose\.yml/.test(coolDry.out) || coolDry.code === 3);
+note(coolDry.code === 3
+  ? "the Coolify CDN is not reachable from this environment; install-coolify.sh said so and stopped with exit 3, which is the designed behaviour"
+  : "the Coolify CDN was reachable from this environment; the dry run walked all five stages");
+
+const coolCheck = sh("bash", [join(ROOT, COOLIFY_INSTALL), "--check-only"], { timeout: 90000 });
+ok("--check-only stops after the checks and changes nothing",
+  (coolCheck.code === 0 || coolCheck.code === 3) && /Host checks/.test(coolCheck.out), `exit ${coolCheck.code}`);
+
+// ==================================================== 15 · the handover pack
+section("handover pack — what the next operator or agent reads first");
+
+for (const f of ["README.md", "STATUS.md", "AGENT-BRIEF.md", "VPS-COOLIFY.md", "WINDOWS-11.md", "ACCEPTANCE.md"]) {
+  const p = `handover/${f}`;
+  ok(`${p} exists`, exists(p));
+  if (exists(p)) ok(`${p} is substantive rather than a stub`, statSync(join(ROOT, p)).size > 2500,
+    `${statSync(join(ROOT, p)).size} bytes`);
+}
+
+const hReadme = exists("handover/README.md") ? read("handover/README.md") : "";
+ok("the handover README names the agent it was written for", /Qoder\.ai IDE/i.test(hReadme));
+ok("the handover README offers all three install paths", /Coolify/.test(hReadme) && /install\.sh/.test(hReadme) && /Windows 11/.test(hReadme));
+ok("the handover README sends the reader to the honest status first", /STATUS\.md/.test(hReadme) && /ACCEPTANCE\.md/.test(hReadme));
+ok("the handover README states that the runtime has no dependencies", /Runtime dependencies: none/i.test(hReadme));
+ok("the handover README forbids pasting credentials into chat", /never paste passwords/i.test(hReadme));
+ok("the handover README lists what the operator must supply", /domain/i.test(hReadme) && /RAM/.test(hReadme));
+
+const status = exists("handover/STATUS.md") ? read("handover/STATUS.md") : "";
+ok("STATUS.md answers the question that was actually asked", /is this complete/i.test(status) && /Verdict/i.test(status));
+ok("STATUS.md separates 'built and tested' from 'not executed here'", /wired/i.test(status) && /Not executed/i.test(status));
+ok("STATUS.md says the JSONL store is what runs", /JSONL/.test(status));
+ok("STATUS.md says DATABASE_URL is set and unused", /DATABASE_URL/.test(status) && /unused/.test(status));
+ok("STATUS.md says GraphSharePoint has never met a real tenant", /GraphSharePoint/.test(status) && /never met a real tenant/.test(status));
+ok("STATUS.md says TLS has not been issued", /TLS has not been issued/i.test(status));
+ok("STATUS.md answers the local Windows 11 question explicitly", /Windows 11/.test(status) && /WSL2/.test(status));
+ok("STATUS.md states the capacity figures the rest of the pack quotes", /22 GB/.test(status) && /20 GB/.test(status) && /50 GB/.test(status));
+ok("STATUS.md records build provenance (repo, branch, runtime)", /GoldenLion-Thai\/Arena\.ai-/.test(status) && /arena\/01a0a1c1-arena-ai/.test(status) && /Node 22/.test(status));
+ok("STATUS.md is honest that the Coolify path was not executed live", /not.{0,20}been run against a live Coolify/i.test(status));
+
+const brief = exists("handover/AGENT-BRIEF.md") ? read("handover/AGENT-BRIEF.md") : "";
+ok("AGENT-BRIEF.md states the job before the detail", /You are being handed a working, tested repository/i.test(brief));
+ok("AGENT-BRIEF.md forbids renaming the app", /Do not rename the app/i.test(brief) && /GRiD-OS-SOVEREIGN/.test(brief));
+ok("AGENT-BRIEF.md requires a test for every new artifact", /every design claim must be backed by working code and a test/i.test(brief));
+ok("AGENT-BRIEF.md keeps internal ports unpublished", /8090/.test(brief) && /11434/.test(brief) && /never be reachable/i.test(brief));
+ok("AGENT-BRIEF.md lists the invariants that the tests pin", /setEmbedder/.test(brief) && /linkSlug/.test(brief) && /reviewBy/.test(brief) && /HashEmbedder/.test(brief));
+ok("AGENT-BRIEF.md warns about the vertical: principal form", /vertical:<id>/.test(brief));
+ok("AGENT-BRIEF.md warns about leftover processes holding ports", /pkill/.test(brief) && /old.{0,10}platform|401/i.test(brief));
+ok("AGENT-BRIEF.md has a definition of done", /Definition of done/i.test(brief) && /ACCEPTANCE\.md/.test(brief));
+ok("AGENT-BRIEF.md tells the agent how to report back", /Reporting back/i.test(brief) && /BLOCKED ON OPERATOR/i.test(brief));
+ok("AGENT-BRIEF.md corrects the search parameter name rather than leaving a guess",
+  /`k`, not `topK`/.test(brief) && /appId comes from the KEY/i.test(brief));
+
+// The brief's route list must match the platform's own help text: a handover
+// document that invents endpoints costs the next agent an hour.
+const serverSrc = read("platform/server.mjs");
+const helpAt = serverSrc.indexOf("Routes: GET /healthz");
+ok("the platform prints its own route list (used to cross-check the brief)", helpAt > 0);
+const helpBlock = helpAt > 0 ? serverSrc.slice(helpAt, helpAt + 700) : "";
+const ROUTES = [
+  ["/healthz", "/healthz"], ["/v1/meta", "/v1/meta"], ["/v1/search", "/v1/search"],
+  ["/v1/documents", "/v1/documents"], ["/v1/documents/:id", "/v1/documents/:id"],
+  ["/v1/documents/:id/open", "/v1/documents/:id/open"], ["/v1/documents/:id/rehydrate", "/v1/documents/:id/rehydrate"],
+  ["/v1/wiki/pages", "/v1/wiki/pages"], ["/v1/wiki/pages/:slug", "/v1/wiki/pages/:slug"],
+  ["/v1/wiki/search", "/v1/wiki/search"], ["/v1/wiki/reviews", "/v1/wiki/reviews"],
+  ["/v1/admin/capacity", "/v1/admin/capacity"], ["/v1/admin/quota", "/quota"],
+  ["/v1/admin/audit", "/audit"], ["/v1/admin/lifecycle/sweep", "/v1/admin/lifecycle/sweep"],
+  ["/v1/admin/lifecycle/enforce", "/enforce"], ["/v1/admin/mirror/sync", "/v1/admin/mirror/sync"],
+  ["/v1/admin/wiki/mirror", "/wiki/mirror"],
+];
+for (const [route, asHelp] of ROUTES) {
+  ok(`the brief documents ${route}`, brief.includes(route));
+  ok(`${route} is a real route the platform lists itself`, helpBlock.includes(asHelp), `looked for "${asHelp}"`);
+}
+const acceptance = exists("handover/ACCEPTANCE.md") ? read("handover/ACCEPTANCE.md") : "";
+for (const [name, doc] of [["AGENT-BRIEF.md", brief], ["ACCEPTANCE.md", acceptance]]) {
+  for (const invented of ["/v1/ingest", "review-queue", "/v1/admin/apps"]) {
+    ok(`${name} does not cite an endpoint or parameter that does not exist: ${invented}`, !doc.includes(invented));
+  }
+}
+
+ok("ACCEPTANCE.md runs the test suite as its first stage", /npm test/.test(acceptance) && /npm install/.test(acceptance));
+ok("ACCEPTANCE.md quotes the assertion counts and tells the reader to record the real ones", /\d{3} passed/.test(acceptance) && /record the numbers/i.test(acceptance));
+ok("ACCEPTANCE.md checks that no runtime dependency was smuggled in", /runtime deps/i.test(acceptance));
+ok("ACCEPTANCE.md proves the security posture with ss, not with a claim", /ss -ltnp/.test(acceptance));
+ok("ACCEPTANCE.md reuses deploy/verify.sh for the live host", /deploy\/verify\.sh/.test(acceptance) && /--expect-tls/.test(acceptance));
+ok("ACCEPTANCE.md checks the cold tier and the way back in", /tier=cold/.test(acceptance) && /rehydrate/i.test(acceptance));
+ok("ACCEPTANCE.md expects 422 for refused admission and 404 for out-of-vertical reads", /422/.test(acceptance) && /404/.test(acceptance));
+ok("ACCEPTANCE.md ends with a sign-off table that allows 'not run'", /Sign-off/i.test(acceptance) && /Not run, with reason/i.test(acceptance));
+ok("ACCEPTANCE.md carries the known-not-wired list forward", /Known-not-wired/i.test(acceptance) && /STATUS\.md/.test(acceptance));
+
+const vps = exists("handover/VPS-COOLIFY.md") ? read("handover/VPS-COOLIFY.md") : "";
+ok("VPS-COOLIFY.md sizes the node from the capacity plan", /16 GB/.test(vps) && /32 GB/.test(vps) && /22 GB/.test(vps));
+ok("VPS-COOLIFY.md gives the install commands in order (check, dry-run, real)", /--check-only/.test(vps) && /--dry-run/.test(vps) && /--yes/.test(vps));
+ok("VPS-COOLIFY.md states the compose location and base directory", /deploy\/coolify\/docker-compose\.yml/.test(vps) && /repository root/.test(vps));
+ok("VPS-COOLIFY.md explains the magic variable", /SERVICE_URL_GRID_8080/.test(vps) && /do not set a\s*\n?\s*value|Coolify generates/i.test(vps));
+ok("VPS-COOLIFY.md gets the operator to a URL on their laptop", /from your laptop/i.test(vps) && /https:\/\/<domain>|https:\/\/grid\.example\.com/.test(vps));
+ok("VPS-COOLIFY.md covers DNS and TLS", /A record|A\s+grid\.example\.com/.test(vps) && /Let's Encrypt/i.test(vps) && /dig \+short/.test(vps));
+ok("VPS-COOLIFY.md says which ports must stay closed", /do \*\*not\*\* open 8080, 8090, 11434 or 5432|not.{0,10}open 8080/i.test(vps));
+ok("VPS-COOLIFY.md covers staying upgraded", /AUTOUPDATE/.test(vps) && /--upgrade/.test(vps) && /auto-updates by default/i.test(vps));
+ok("VPS-COOLIFY.md explains that volumes survive a redeploy", /keeps named volumes across redeploys/i.test(vps));
+ok("VPS-COOLIFY.md has a troubleshooting table", /Troubleshooting/.test(vps) && /502/.test(vps) && /OOM/.test(vps));
+ok("VPS-COOLIFY.md carries the not-wired Postgres note", /DATABASE_URL/.test(vps) && /unused|does not expect the platform to read/i.test(vps));
+ok("VPS-COOLIFY.md is honest that the install was not executed here", /has \*\*not\*\* been done is run it|not.{0,30}run it/i.test(vps));
+ok("VPS-COOLIFY.md names the Coolify version it was verified against", /v4\.4\.2/.test(vps));
+
+const win = exists("handover/WINDOWS-11.md") ? read("handover/WINDOWS-11.md") : "";
+ok("WINDOWS-11.md answers the question directly", /yes\.\*\* The product is plain Node 22|— yes\./i.test(win));
+ok("WINDOWS-11.md gives the WSL2 route with real commands", /wsl --install/.test(win) && /wsl -l -v/.test(win) && /Ubuntu/.test(win));
+ok("WINDOWS-11.md gives the native route for people without WSL", /winget install/.test(win) && /Git Bash/.test(win));
+ok("WINDOWS-11.md keeps the repository off /mnt/c and says why", /\/mnt\/c/.test(win) && /slower/i.test(win));
+ok("WINDOWS-11.md covers the CRLF trap and the fix", /core\.autocrlf/.test(win) && /\.gitattributes/.test(win));
+ok("WINDOWS-11.md covers reaching Windows Ollama from WSL2", /OLLAMA_HOST/.test(win) && /ip route show default/.test(win) && /New-NetFirewallRule/.test(win));
+ok("WINDOWS-11.md covers GPU passthrough honestly", /nvidia-smi/.test(win) && /Windows.{0,20}NVIDIA driver|Windows\*\* driver/i.test(win));
+ok("WINDOWS-11.md states what does not apply locally", /install\.sh/.test(win) && /Linux-only/.test(win));
+ok("WINDOWS-11.md notes that local.sh already opens a Windows browser", /powershell\.exe -c "start/.test(win));
+ok("WINDOWS-11.md has a troubleshooting table", /Troubleshooting on Windows/.test(win) && /EADDRINUSE/.test(win));
+
+ok(".gitattributes exists so Windows checkouts do not break the bash scripts", exists(".gitattributes"));
+if (exists(".gitattributes")) {
+  const ga = read(".gitattributes");
+  ok(".gitattributes forces LF on shell scripts", /^\*\.sh text eol=lf$/m.test(ga));
+  ok(".gitattributes forces LF on systemd units and the Makefile", /^\*\.service text eol=lf$/m.test(ga) && /^Makefile text eol=lf$/m.test(ga));
+  ok(".gitattributes forces LF on container and compose files", /^Dockerfile text eol=lf$/m.test(ga) && /^\*\.yml text eol=lf$/m.test(ga));
+  ok(".gitattributes marks binaries so they are never re-encoded", /\.png binary/.test(ga) && /\.woff2 binary/.test(ga) && /\.tgz binary/.test(ga));
+  ok(".gitattributes explains the failure it prevents", /command not found/i.test(ga));
+}
+
+// ------------------------------------------------------- cross-document truth
+const coolifyVersions = [...new Set([status, vps].flatMap((d) => [...d.matchAll(/v4\.\d+\.\d+/g)].map((m) => m[0])))];
+ok("STATUS.md and VPS-COOLIFY.md agree on the Coolify version they were verified against",
+  coolifyVersions.length === 1, coolifyVersions.join(", "));
+ok("the handover pack quotes the same capacity figures as the platform",
+  /20 GB/.test(status) && /22 GB/.test(vps) && /10\.5|10,?226|7\.05/.test(status + vps));
+ok("every handover document points at another one", ["STATUS.md", "ACCEPTANCE.md", "AGENT-BRIEF.md", "VPS-COOLIFY.md", "WINDOWS-11.md"]
+  .every((f) => [hReadme, status, brief, vps, win, acceptance].some((d) => d.includes(f))));
+ok("the root README sends readers to the handover pack", /handover\//.test(read("README.md")) && /Coolify/i.test(read("README.md")));
+ok("deploy/README documents the Coolify path", /coolify/i.test(read("deploy/README.md")) && /install-coolify\.sh/.test(read("deploy/README.md")));
+ok("deploy/README documents the container image", /Dockerfile/.test(read("deploy/README.md")));
+
 // ------------------------------------------------------------------ teardown
 try { process.kill(-local.pid, "SIGTERM"); } catch { /* already gone */ }
 await wait(400);

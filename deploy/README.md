@@ -1,14 +1,17 @@
 # Deploying GRiD-OS-SOVEREIGN
 
-Four ways to get from this repository to a running private-model host, fastest
+Six ways to get from this repository to a running private-model host, fastest
 first. Every one of them ends with `deploy/verify.sh` proving the deployment
-rather than assuming it.
+rather than assuming it. The operator-facing walkthroughs — including what to
+hand an AI IDE and how to run this on Windows 11 — live in [`../handover/`](../handover/).
 
 | Method | Command | Time | Use it when |
 | --- | --- | --- | --- |
 | **Fastest — local** | `bash deploy/local.sh` | ~30s + model pull | your own machine, one user |
-| **Fastest — VPS** | `curl … install.sh \| sudo bash -s -- …` | ~10 min | you already have a box |
+| **Coolify on a VPS** | `sudo bash deploy/coolify/install-coolify.sh` | ~15 min | you want a free-forever panel, TLS, redeploys and a **public URL** |
+| **Fastest — VPS** | `curl … install.sh \| sudo bash -s -- …` | ~10 min | you already have a box and no panel |
 | **Artifact** | `bash deploy/package.sh` → `scp` → install | ~10 min | no GitHub access from the host, or you want a checksummed build |
+| **Container** | `docker build -t grid-os-sovereign .` | ~1 min | any Docker host, or Coolify/Fly/Render/ECS |
 | **Fully automated** | `cd oci/terraform && terraform apply` | ~15 min | no box yet — provision, install, verify, destroy |
 
 Nothing in the app tier has runtime dependencies: `node server.js` and a model
@@ -317,6 +320,69 @@ production Postgres + pgvector shape and the `pgvector` profile applies it, but
 the adapter that makes the server read and write those tables is the next piece
 of work — `DATABASE_URL` is set in the compose file and the platform does not use
 it yet.
+
+---
+
+## 6c · Coolify on a VPS, and the container image
+
+**Coolify** is Apache-2.0 open source and free forever on your own hardware. It is
+the route that gets you a public HTTPS URL you can open from a laptop, because it
+brings its own reverse proxy (Traefik by default in v4; Caddy and custom are
+options), Let's Encrypt certificates, and one-click redeploys from this repository.
+
+```sh
+sudo bash deploy/coolify/install-coolify.sh --check-only    # host + network checks, changes nothing
+sudo bash deploy/coolify/install-coolify.sh --dry-run --yes # prints every command it would run
+sudo bash deploy/coolify/install-coolify.sh --email ops@example.com --username kami --yes
+sudo bash deploy/coolify/install-coolify.sh --upgrade       # force the latest Coolify
+```
+
+The script does not reimplement or fork Coolify. It pre-flights the host (root,
+OS, curl, RAM, disk, ports 80/443/8000, Docker), reaches
+`cdn.coollabs.io/coolify/versions.json` to report the current release, downloads
+the **official** `install.sh`, prints its line count, sha256 and first line so you
+can see what you are about to run as root, then executes it with the installer's
+own documented unattended variables (`ROOT_USERNAME`, `ROOT_USER_EMAIL`,
+`ROOT_USER_PASSWORD`, `AUTOUPDATE`, `REGISTRY_URL`). Exit codes: `0` ok · `1` a
+host check failed · `2` you aborted · `3` the CDN is unreachable. Passwords are
+taken from `--password-file`, never from argv, because argv is world-readable via
+`/proc/<pid>/cmdline` and lands in shell history.
+
+Then in the Coolify UI (`http://<vps-ip>:8000`): **New Resource → Docker
+Compose**, compose location `deploy/coolify/docker-compose.yml`, base directory
+the repository root, branch `arena/01a0a1c1-arena-ai`. Set `BASIC_AUTH_USER`,
+`BASIC_AUTH_PASS`, `EMBED_MODEL`, `CHAT_MODEL` (and `POSTGRES_PASSWORD` if you
+enable the `pgvector` profile). Deploy.
+
+The compose file's `grid-os` service declares `SERVICE_URL_GRID_8080` — Coolify's
+magic variable — so Coolify generates the URL, points its proxy at `grid-os:8080`
+on the internal network and issues the certificate. Nothing publishes a port.
+`platform`, `ollama` and `postgres` have no magic variable and no `ports:`, so
+they exist on the compose network only. Full walkthrough, DNS, GPU, upgrades and
+troubleshooting: [../handover/VPS-COOLIFY.md](../handover/VPS-COOLIFY.md).
+
+**The image.** The root [`Dockerfile`](../Dockerfile) builds one image with two
+roles: `node server.js` by default (app tier, port 8080) and
+`node platform/server.mjs` as a command override (data platform). There is no
+`npm install` in it, because the runtime has zero dependencies; it runs as a
+non-root user, mounts `/data` for the platform's store, and its `HEALTHCHECK`
+really fetches `/healthz` and fails on a non-2xx. `.dockerignore` keeps `.git`,
+`node_modules`, the proof/packaging layers and — importantly — `.data/` out of
+the build context, since local state can hold real content hashes.
+
+```sh
+docker build -t grid-os-sovereign .
+docker run --rm -p 8080:8080 grid-os-sovereign
+docker compose -f deploy/coolify/docker-compose.yml up -d              # full stack by hand
+docker compose -f deploy/coolify/docker-compose.yml --profile pgvector up -d
+```
+
+**Honest status:** these artifacts are tested statically and the installer was
+exercised with `--dry-run` (it exits `3` with a clear message where the Coolify
+CDN is unreachable, as in a network-restricted sandbox). No Coolify instance was
+installed from here: that needs root on your VPS, Docker and egress. Flags,
+environment variables, the upgrade path, the UI port and the magic-variable
+convention were verified against Coolify's own source at **v4.4.2**.
 
 ---
 

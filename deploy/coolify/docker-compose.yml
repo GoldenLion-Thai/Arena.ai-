@@ -1,0 +1,205 @@
+# ============================================================================
+# Coolify deployment — GRiD-OS-SOVEREIGN + KiNETiC-Ai on one VPS.
+#
+# Coolify app type:  Docker Compose
+# Compose location:  deploy/coolify/docker-compose.yml
+# Base directory:    the repository root (Coolify's default)
+#
+# Relative paths in a compose file resolve against *the compose file*, not the
+# working directory, so the build context here is ../.. — the repository root,
+# where the Dockerfile lives. That is what lets one Dockerfile serve both the
+# app tier and the data platform, and it works the same way whether Coolify runs
+# compose from the repo root or from this directory.
+#
+# HOW THE PUBLIC URL HAPPENS
+#   grid-os declares the magic environment variable SERVICE_URL_GRID_8080.
+#   Coolify parses SERVICE_URL_<name>_<port>, generates a URL for that service,
+#   routes its proxy to grid-os:8080 on the internal network and terminates TLS
+#   with Let's Encrypt. Nothing in this file publishes a port — that is the
+#   point. You then set your own domain in the Coolify UI (Resource → Domains)
+#   or keep the generated one, and that URL is what your laptop opens.
+#
+#   platform, ollama and postgres deliberately have no SERVICE_URL_* and no
+#   ports:. They are reachable from grid-os over the compose network and from
+#   nowhere else. The browser only ever sees one origin.
+#
+# BEFORE THE FIRST DEPLOY, set these in Coolify (Resource → Environment
+# Variables), not in this file:
+#   BASIC_AUTH_USER / BASIC_AUTH_PASS   the UI's basic auth (leave unset for none)
+#   EMBED_MODEL   default nomic-embed-text
+#   CHAT_MODEL    default qwen2.5:7b-instruct-q4_K_M
+#   POSTGRES_PASSWORD                   only if the pgvector profile is enabled
+#
+# GPU: the ollama service ships without device reservations so the stack deploys
+# on a CPU VPS. On a GPU node, uncomment the `deploy:` block and install the
+# NVIDIA container toolkit on the host first — Coolify does not do that for you.
+# ============================================================================
+
+services:
+  # The only service Coolify exposes. Serves the UI and proxies /gateway/* to
+  # Ollama and /platform/* to the platform, so every browser request is
+  # same-origin and no internal address ever reaches the client.
+  grid-os:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      - SERVICE_URL_GRID_8080 # Coolify magic env → public URL + proxy + TLS
+      - PORT=8080
+      - HOST=0.0.0.0 # inside the container; Coolify's proxy does the publishing
+      - OLLAMA_URL=http://ollama:11434 # compose DNS name, not a public host
+      - GATEWAY_PREFIX=/gateway/
+      - PLATFORM_URL=http://platform:8090
+      - PLATFORM_PREFIX=/platform/
+      - BASIC_AUTH_USER=${BASIC_AUTH_USER:-}
+      - BASIC_AUTH_PASS=${BASIC_AUTH_PASS:-}
+    depends_on:
+      platform:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      # the image is alpine with no curl, but Node 22 has fetch
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Same image, different command: the data platform — ingest, hybrid retrieval,
+  # the wiki, retention and the SharePoint mirror. Its JSONL store lives on a
+  # named volume so a redeploy does not lose state.
+  platform:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command: ["node", "platform/server.mjs"]
+    environment:
+      - PLATFORM_PORT=8090
+      - PLATFORM_HOST=0.0.0.0 # compose network only; nothing publishes 8090
+      - PLATFORM_DATA=/data
+      - PLATFORM_EMBED=auto # Ollama embeddings, deterministic local fallback
+      - OLLAMA_URL=http://ollama:11434
+      # Set when the pgvector profile is used. Honest note: the adapter that
+      # reads it is the next piece of work — the schema is applied, the platform
+      # still persists to /data. See handover/STATUS.md §3.
+      - DATABASE_URL=postgres://kinetic:${POSTGRES_PASSWORD:-change-me}@postgres:5432/kinetic
+    volumes:
+      - platform-data:/data
+    depends_on:
+      - ollama
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8090/healthz').then((r)=>r.json()).then((j)=>process.exit(j.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434 # compose network only
+      - OLLAMA_KEEP_ALIVE=30m
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+      - OLLAMA_MODELS=/models
+    volumes:
+      - ollama-models:/models
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    # GPU node only — uncomment after installing the NVIDIA container toolkit:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # One-shot: pull the weights, then exit. The embedding model is what makes
+  # retrieval real; without it the platform falls back to a deterministic
+  # hashing embedder that is honest about being lexical.
+  model-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - CHAT_MODEL=${CHAT_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+      - EMBED_MODEL=${EMBED_MODEL:-nomic-embed-text}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "ollama pull $${EMBED_MODEL} && ollama pull $${CHAT_MODEL}"
+    restart: "no"
+
+  # ---------------------------------------------------- production database
+  # Optional. Enable in Coolify (Resource → Docker Compose → profiles: pgvector)
+  # or run `docker compose -f deploy/coolify/docker-compose.yml --profile
+  # pgvector up -d` by hand. Postgres 16 + pgvector with platform/schema.sql
+  # applied on first boot: HNSW index, row level security, retention views and
+  # the capacity arithmetic. Tuned from capacityPlan(): at the 20 GB live
+  # ceiling the index wants ~7.05 GB and the heap ~9.95 GB, so the working set
+  # is ~10.5 GB and the policy is 2× that.
+  postgres:
+    image: pgvector/pgvector:pg16
+    profiles: ["pgvector"]
+    environment:
+      - POSTGRES_DB=kinetic
+      - POSTGRES_USER=kinetic
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me} # set it in Coolify
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ../../platform/schema.sql:/docker-entrypoint-initdb.d/10-kinetic-schema.sql:ro
+    command:
+      - postgres
+      - -c
+      - shared_buffers=4GB
+      - -c
+      - effective_cache_size=12GB
+      - -c
+      - maintenance_work_mem=3GB # stops an index build spilling to disk (10-50×)
+      - -c
+      - max_connections=100 # 6 apps × 8 pooled = 48 wanted; PgBouncer in front
+      - -c
+      - hnsw.ef_search=100
+      - -c
+      - log_min_duration_statement=500ms
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kinetic -d kinetic"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+# 50 GB per node is the provisioning figure; the live ceiling inside it is 20 GB
+# and the platform enforces that by demoting what nobody opens to SharePoint.
+# Coolify keeps named volumes across redeploys and only removes them when you
+# delete the resource — so a redeploy is safe and a teardown is deliberate.
+volumes:
+  platform-data:
+  ollama-models:
+  pg-data:
