@@ -1,0 +1,61 @@
+# ============================================================================
+# Line endings. This repository is installed on Linux hosts (and inside WSL2),
+# and every automation entry point is a bash script. A CRLF checkout turns
+# `bash deploy/install.sh` into a wall of `$'\r': command not found`, which is
+# the single most confusing failure a Windows operator can hit here — so LF is
+# enforced in the repository rather than left to each developer's git config.
+#
+# If you are on Windows and cloned before this file existed:
+#   git config core.autocrlf input && git rm --cached -r . && git reset --hard
+# ============================================================================
+
+* text=auto eol=lf
+
+# Scripts and unit files: bash and systemd both choke on CR.
+*.sh text eol=lf
+*.bash text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+Makefile text eol=lf
+*.mk text eol=lf
+
+# Containers, cloud and configuration.
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.conf text eol=lf
+*.tmpl text eol=lf
+*.env text eol=lf
+.env.example text eol=lf
+
+# Application code, styles, data and prose.
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.svg text eol=lf
+*.sql text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Never touch the bytes of a binary.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.wav binary
+*.tgz binary
+*.tar binary
+*.zst binary
+*.zip binary
