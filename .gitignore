@@ -1,0 +1,6 @@
+# generated brand previews (source of truth = tools/brand_gen.py + committed SVGs)
+design/brand/previews/
+
+# OS noise
+.DS_Store
+Thumbs.db

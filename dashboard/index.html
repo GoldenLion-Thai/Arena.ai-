@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARENA COMMAND — Project Intelligence Dashboard</title>
+<style>
+  :root{
+    --bg:#0A0B0D; --surface:#111316; --line:#1A2228; --text:#C9D1D9; --dim:#6B7280;
+    --cyan:#3DD6F5; --warn:#EF4444; --ok:#34D399; --gold:#F5C842;
+    --mono:ui-monospace,"Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;border-radius:0}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px}
+  header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);
+    padding:14px 24px;position:sticky;top:0;background:var(--bg);z-index:5}
+  header img{height:48px;display:block}
+  h1{font-size:14px;letter-spacing:.2em;margin:0}
+  h2{font-size:12px;letter-spacing:.22em;color:var(--cyan);margin:0 0 14px;font-weight:600}
+  h3{font-size:11px;letter-spacing:.18em;color:var(--dim);margin:22px 0 8px}
+  main{max-width:1180px;margin:0 auto;padding:28px 24px 80px}
+  section{margin-bottom:44px}
+  .lede{color:var(--dim);line-height:1.8;margin-bottom:18px}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{color:var(--dim);font-size:10px;letter-spacing:.16em;font-weight:600;background:var(--surface)}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .pct{display:flex;align-items:center;gap:10px}
+  .track{flex:1;height:6px;background:var(--line);min-width:70px}
+  .track i{display:block;height:6px;background:var(--cyan)}
+  .track i.g{background:var(--ok)} .track i.y{background:var(--gold)} .track i.r{background:var(--warn)}
+  .pill{border:1px solid var(--line);padding:2px 8px;font-size:10px;letter-spacing:.12em;white-space:nowrap}
+  .pill.ok{color:var(--ok);border-color:var(--ok)}
+  .pill.run{color:var(--cyan);border-color:var(--cyan)}
+  .pill.plan{color:var(--dim)}
+  .pill.hold{color:var(--gold);border-color:var(--gold)}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .card{border:1px solid var(--line);background:var(--surface);padding:16px}
+  .card img{height:40px;margin-bottom:12px;display:block}
+  .card .name{letter-spacing:.14em;margin-bottom:8px}
+  .card .meta{color:var(--dim);font-size:12px;line-height:1.7}
+  .rail{height:3px;background:var(--line);margin-top:4px}
+  .rail i{display:block;height:3px}
+  pre{background:var(--surface);border:1px solid var(--line);padding:16px;overflow:auto;
+    color:var(--text);line-height:1.6;margin:0}
+  .tree{background:var(--surface);border:1px solid var(--line);padding:18px;line-height:1.8;overflow:auto}
+  .tree b{color:var(--cyan);font-weight:500}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .logo-row{display:flex;gap:14px;flex-wrap:wrap}
+  .logo-cell{border:1px solid var(--line);background:var(--surface);padding:12px;width:252px}
+  .logo-cell img{width:100%;display:block}
+  .badge{border:1px solid var(--line);padding:6px 12px;color:var(--dim);font-size:10px;letter-spacing:.14em}
+  .badge b{color:var(--ok)}
+  ul{margin:6px 0 0;padding-left:18px;color:var(--dim);line-height:1.8}
+  a{color:var(--cyan)}
+  .lvl{display:grid;grid-template-columns:64px 1fr 1fr;gap:0}
+  .lvl>div{border:1px solid var(--line);padding:10px 12px}
+  .lvl .L{color:var(--cyan);letter-spacing:.12em}
+  .lvl .cur{border-color:var(--cyan)}
+</style>
+</head>
+<body>
+<header>
+  <img src="../design/brand/core/lockup-expanded.svg" alt="CONTENT COMMAND">
+  <h1>PROJECT INTELLIGENCE DASHBOARD</h1>
+  <div class="badge">AUDIT 2026-09-23 · BRANCH <b>arena/01a0cd26-arena-ai</b></div>
+</header>
+
+<main>
+  <section>
+    <h2>0. OVERALL VIEW</h2>
+    <div class="lede">
+      Three asset classes: <b style="color:var(--cyan)">brand system (SEALED)</b> ·
+      <b style="color:var(--cyan)">Content Command core (IN PROGRESS, 70%)</b> ·
+      <b style="color:var(--cyan)">SFGa-OS Recon tooling (DESIGN-ONLY, gated)</b>.
+      Strengths: data ontology, scoring logic, terminal design language. Gaps: operational maturity and loop closure.
+      Direction: build the shell on real data → harden ops → close the feedback loop → climb the autonomy ladder with human veto gates.
+      Full detail: <a href="../docs/PROJECT-AUDIT.md">PROJECT-AUDIT.md</a> · <a href="../docs/AUTONOMY-ROADMAP.md">AUTONOMY-ROADMAP.md</a>
+    </div>
+    <table>
+      <thead><tr><th>PROGRAM LENS</th><th>STATE</th><th>%</th><th>BINDING CONSTRAINT</th></tr></thead>
+      <tbody>
+        <tr><td>Brand &amp; design language</td><td><span class="pill ok">SEALED</span></td><td>95%</td><td>UI integration + favicon/OG export</td></tr>
+        <tr><td>Content Command core</td><td><span class="pill run">IN PROGRESS</span></td><td>70%</td><td>Shell on live data; sync hardening</td></tr>
+        <tr><td>Operational maturity</td><td><span class="pill plan">NOT STARTED</span></td><td>20%</td><td>Health, retries, idempotency, error queues</td></tr>
+        <tr><td>Feedback loop closure</td><td><span class="pill plan">ROADMAP</span></td><td>25%</td><td>Publish→metrics→re-score automation</td></tr>
+        <tr><td>Autonomy</td><td><span class="pill hold">L1.5</span></td><td>—</td><td>Continuous ingestion + closed loop</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>1. APP PORTFOLIO — STATUS REPORTS</h2>
+    <table>
+      <thead><tr><th style="width:220px">APP</th><th>STATUS</th><th style="width:180px">% COMPLETE</th><th>WHAT IT NEEDS</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><a href="../app/content-command/index.html" style="color:var(--cyan,#3DD6F5);text-decoration:none;font-weight:bold">CONTENT COMMAND &#8599;</a><br><span class="pill">core vertical</span></td>
+          <td><span class="pill run">IN PROGRESS</span><br><span style="color:var(--dim)">functional prototype shipped &middot; design 92</span></td>
+          <td><div class="pct"><div class="track"><i style="width:78%"></i></div>78%</div></td>
+          <td>Shell routes LIVE on mock data (dashboard&rarr;library&rarr;radar&rarr;scorer&rarr;brief&rarr;agent&rarr;sources); next: swap mock layer for real API connectors + sync retries + idempotency; prompt versioning + tag review queue; scorer rubric + ICP context; weekly brief cron; sources secret store</td>
+        </tr>
+        <tr>
+          <td>DECRYPTION &amp; RECONSTRUCTION<br><span class="pill">recon (derived)</span></td>
+          <td><span class="pill hold">DESIGN-ONLY · GATED</span><br><span style="color:var(--dim)">ui concept + spec complete · no extraction logic (policy)</span></td>
+          <td><div class="pct"><div class="track"><i class="y" style="width:45%"></i></div>45%</div></td>
+          <td>Written-authorization workflow + legal review; integration with established audited forensic engines (not custom crypto); encrypted workspace + hash-chained audit store; red-team review before any build</td>
+        </tr>
+        <tr>
+          <td>PROJECT INTELLIGENCE DASHBOARD<br><span class="pill">meta</span></td>
+          <td><span class="pill ok">SHIPPED V1</span></td>
+          <td><div class="pct"><div class="track"><i class="g" style="width:90%"></i></div>90%</div></td>
+          <td>Wire to live metrics API; auto-refresh; per-app drilldowns</td>
+        </tr>
+        <tr>
+          <td>BRAND &amp; LOGO SYSTEM<br><span class="pill">meta</span></td>
+          <td><span class="pill ok">SEALED V1</span></td>
+          <td><div class="pct"><div class="track"><i class="g" style="width:95%"></i></div>95%</div></td>
+          <td>CSS token export; favicon/OG raster pipeline; integrate in product shells (GATE D per new vertical)</td>
+        </tr>
+        <tr>
+          <td>SALES COMMAND<br><span class="pill">vertical</span></td>
+          <td><span class="pill plan">DESIGN-READY</span></td>
+          <td><div class="pct"><div class="track"><i class="r" style="width:15%"></i></div>15%</div></td>
+          <td>Reuse core shell + engines; CRM connectors; pipeline ontology</td>
+        </tr>
+        <tr>
+          <td>SUPPORT COMMAND<br><span class="pill">vertical</span></td>
+          <td><span class="pill plan">DESIGN-READY</span></td>
+          <td><div class="pct"><div class="track"><i class="r" style="width:15%"></i></div>15%</div></td>
+          <td>Reuse core shell + engines; ticket connectors; resolution taxonomy</td>
+        </tr>
+        <tr>
+          <td>PRODUCT COMMAND<br><span class="pill">vertical</span></td>
+          <td><span class="pill plan">DESIGN-READY</span></td>
+          <td><div class="pct"><div class="track"><i class="r" style="width:15%"></i></div>15%</div></td>
+          <td>Reuse core shell + engines; event/feature telemetry; journey ontology</td>
+        </tr>
+        <tr>
+          <td>FINANCE COMMAND<br><span class="pill">vertical</span></td>
+          <td><span class="pill plan">DESIGN-READY</span></td>
+          <td><div class="pct"><div class="track"><i class="r" style="width:15%"></i></div>15%</div></td>
+          <td>Reuse core shell + engines; ledger connectors; threshold policy</td>
+        </tr>
+        <tr>
+          <td>RESEARCH COMMAND<br><span class="pill">vertical</span></td>
+          <td><span class="pill plan">DESIGN-READY</span></td>
+          <td><div class="pct"><div class="track"><i class="r" style="width:15%"></i></div>15%</div></td>
+          <td>Reuse core shell + engines; corpus ingestion; citation engine</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>CONTENT COMMAND — SUBSYSTEM LEDGER</h3>
+    <table>
+      <thead><tr><th>SUBSYSTEM</th><th style="width:150px">%</th><th>WHAT IT NEEDS</th></tr></thead>
+      <tbody>
+        <tr><td>Data architecture / schema</td><td><div class="pct"><div class="track"><i class="g" style="width:100%"></i></div>100%</div></td><td>Confirm indexes, REFS, pgvector readiness</td></tr>
+        <tr><td>Outlier compute engine</td><td><div class="pct"><div class="track"><i class="g" style="width:95%"></i></div>95%</div></td><td>Baseline windowing; small-sample bias handling</td></tr>
+        <tr><td>Platform ingestion / sync</td><td><div class="pct"><div class="track"><i class="g" style="width:85%"></i></div>85%</div></td><td>Retries, idempotency keys, incremental cursors</td></tr>
+        <tr><td>LLM enrichment / taxonomy</td><td><div class="pct"><div class="track"><i style="width:80%"></i></div>80%</div></td><td>Prompt versioning, confidence thresholds, tag review queue</td></tr>
+        <tr><td>Idea scoring engine</td><td><div class="pct"><div class="track"><i style="width:80%"></i></div>80%</div></td><td>Rubric weighting, ICP context, comparable retrieval</td></tr>
+        <tr><td>Hook performance scoreboard</td><td><div class="pct"><div class="track"><i class="g" style="width:85%"></i></div>85%</div></td><td>Fatigue status, format correlation, demand-signal sort</td></tr>
+        <tr><td>Frontend terminal UI</td><td><div class="pct"><div class="track"><i style="width:88%"></i></div>88%</div></td><td>Shell routes + signal cards + scoreboards + density rules BUILT (mock data); wire real connectors</td></tr>
+        <tr><td>Intelligence agent</td><td><div class="pct"><div class="track"><i class="y" style="width:50%"></i></div>50%</div></td><td>Ontology routing, source citations, safe read-only SQL</td></tr>
+        <tr><td>Weekly brief / reporting</td><td><div class="pct"><div class="track"><i class="y" style="width:40%"></i></div>40%</div></td><td>Cron trigger, report template, roll-up metrics</td></tr>
+        <tr><td>API connection cards</td><td><div class="pct"><div class="track"><i class="r" style="width:30%"></i></div>30%</div></td><td>Sources module, secret management UI, health indicators</td></tr>
+        <tr><td>Logo / sidebar branding</td><td><div class="pct"><div class="track"><i class="g" style="width:95%"></i></div>95%</div></td><td>Shell integration of locked brand system (this cycle closed the 40%→95%)</td></tr>
+        <tr><td>End-to-end autonomy</td><td><div class="pct"><div class="track"><i class="r" style="width:25%"></i></div>25%</div></td><td>Close publish→performance→enrichment→re-score loop</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>2. LOGO SYSTEM — TOP-LEFT SIDEBAR BRAND</h2>
+    <div class="lede">
+      Collapsed sidebar <b>64u mark</b> (48–64px) · expanded sidebar <b>240u lockup</b> (220–260px) ·
+      nothing round or oval · no capital <b>K</b> (structurally impossible — no K glyph exists) ·
+      8u grid · 1u hairline · 0u radius · 12u symbol-text gap. Full spec: <a href="../design/brand/LOGO-SYSTEM.md">LOGO-SYSTEM.md</a>
+    </div>
+    <h3>CORE — COLLAPSED / EXPANDED / STATES</h3>
+    <div class="logo-row">
+      <div class="logo-cell"><img src="../design/brand/core/mark-collapsed.svg" alt="collapsed mark" style="width:64px;margin:0 auto 8px"><div class="meta" style="color:var(--dim);text-align:center">COLLAPSED EMBLEM</div></div>
+      <div class="logo-cell"><img src="../design/brand/core/lockup-expanded.svg" alt="expanded lockup"><div class="meta" style="color:var(--dim);text-align:center">EXPANDED LAYOUT</div></div>
+      <div class="logo-cell"><img src="../design/brand/core/mark-states.svg" alt="states"><div class="meta" style="color:var(--dim);text-align:center">ACTIVE / WARN / NEUTRAL</div></div>
+      <div class="logo-cell"><img src="../design/brand/core/mark-collapsed-dense.svg" alt="dense mark" style="width:64px;margin:0 auto 8px"><div class="meta" style="color:var(--dim);text-align:center">DENSE MODE</div></div>
+      <div class="logo-cell"><img src="../design/brand/templates/construction-sheet.svg" alt="construction"></div>
+      <div class="logo-cell"><img src="../design/brand/templates/module-icons.svg" alt="module glyphs"><div class="meta" style="color:var(--dim);text-align:center">MODULE GLYPHS (NAV)</div></div>
+    </div>
+    <h3>VERTICAL SET — SAME GRID, ONE SWAPPED MOTIF</h3>
+    <div class="logo-cell" style="width:100%"><img src="../design/brand/templates/vertical-template.svg" alt="vertical template"></div>
+
+    <h3>DECISION TREE — WHICH EMBLEM, WHAT TO AMEND</h3>
+    <div class="tree">
+START — need a brand mark<br>
+├─ <b>Top-left app corner?</b><br>
+│&nbsp;&nbsp;├─ YES → sidebar collapsed? → YES: <b>collapsed mark</b> (dense UI? → dense mark)<br>
+│&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ NO: <b>expanded lockup</b> at sidebar width (240u)<br>
+│&nbsp;&nbsp;└─ NO ↓<br>
+├─ <b>Which surface?</b><br>
+│&nbsp;&nbsp;├─ Content core → waveform motif + cyan<br>
+│&nbsp;&nbsp;├─ Registered vertical → its motif + accent (matrix §4)<br>
+│&nbsp;&nbsp;├─ NEW vertical → DERIVE: swap <b>motif only</b> (name law: “X COMMAND”, no K)<br>
+│&nbsp;&nbsp;├─ Module / topic badge → 16u module glyph — <b>never</b> the product logo<br>
+│&nbsp;&nbsp;└─ Partner page → mark 60% opacity, no lockup<br>
+├─ <b>State?</b> active → vertical hue · warn → #EF4444 · neutral → #6B7280 · dense → signal lines only<br>
+└─ <b>Ship gate:</b> curves? K? width mismatch? altered base? → fix → <b>brand_lint.py PASS</b> → ship<br>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. STEPS TO AUTONOMY</h2>
+    <pre>PUBLISH → METRICS SYNC → OUTLIER SCORE → ENRICHMENT RE-RUN → AGGREGATES UPDATE
+   → SCORER RE-TRAINS → NEXT BRIEF → HUMAN APPROVES (GATE A) → PUBLISH …</pre>
+    <h3>LADDER</h3>
+    <div class="lvl">
+      <div class="L">L1</div><div>Manual sync, manual scoring</div><div class="cur">◄ WE ARE HERE (L1.5: designs + engines specified/prototyped, not continuous)</div>
+      <div class="L">L2</div><div>Auto-ingestion + auto-outlier detection</div><div>needs: retries, idempotency, health checks</div>
+      <div class="L">L3</div><div>Auto hook/topic/format tagging</div><div>needs: prompt versions, thresholds, review queue</div>
+      <div class="L">L4</div><div>Auto-brief generation from scored ideas</div><div>GATE A: human approves briefs</div>
+      <div class="L">L5</div><div>Auto-weekly report + recommended slate</div><div>needs: cron pipeline, roll-up metrics</div>
+      <div class="L">L6</div><div>Auto-publish scheduling with approval</div><div>GATE B: human approves schedule</div>
+      <div class="L">L7</div><div>Fully autonomous loop + oversight console</div><div>GATE C: kill-switch, drop a level</div>
+    </div>
+    <h3>NEXT 30 DAYS</h3>
+    <ul>
+      <li>Mount Content Command shell (sidebar + dashboard + library) on real data</li>
+      <li>Sync hardening: retries, idempotency keys, incremental cursors, health badges</li>
+      <li>API connection cards → secret store + last-ingestion stamps</li>
+      <li>Integrate brand system into shell (GATE D lint in CI)</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

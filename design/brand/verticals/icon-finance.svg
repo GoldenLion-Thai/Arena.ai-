@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<title>icon-finance</title>
+<rect x="0" y="0" width="64" height="64" fill="#0A0B0D"/>
+<g data-text="FINANCE COMMAND">
+<rect x="8" y="44" width="8" height="8" fill="#F5C842"/>
+<rect x="20" y="36" width="8" height="16" fill="#F5C842"/>
+<rect x="32" y="28" width="8" height="24" fill="#F5C842"/>
+<rect x="8" y="52" width="48" height="2" fill="#F5C842"/>
+<rect x="52" y="44" width="4" height="8" fill="#F5C842"/>
+<rect x="8" y="14" width="5" height="8" fill="#F5C842"/>
+<rect x="17" y="10" width="5" height="12" fill="#F5C842"/>
+<rect x="26" y="12" width="5" height="10" fill="#F5C842"/>
+<rect x="35" y="6" width="5" height="16" fill="#F5C842"/>
+<polyline points="6,12.5 58,12.5" fill="none" stroke="#F5C842" stroke-width="1" stroke-dasharray="3 2"/>
+</g>
+</svg>

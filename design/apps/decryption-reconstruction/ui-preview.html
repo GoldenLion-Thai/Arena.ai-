@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RECON COMMAND — Recovery Console (SIMULATION)</title>
+<style>
+  :root{
+    --bg:#0A0B0D; --surface:#111316; --line:#1A2228; --text:#C9D1D9; --dim:#6B7280;
+    --accent:#F97316; --cyan:#3DD6F5; --warn:#EF4444; --ok:#34D399;
+    --mono:ui-monospace,"Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;border-radius:0}
+  html,body{margin:0;height:00;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px}
+  body{min-height:100vh;display:grid;grid-template-columns:240px 1fr;grid-template-rows:48px 1fr 132px}
+  header{grid-column:1/3;display:flex;align-items:center;justify-content:space-between;
+    border-bottom:1px solid var(--line);padding:0 16px;height:48px}
+  .badge{border:1px solid var(--line);padding:4px 10px;color:var(--dim);letter-spacing:.08em;font-size:11px}
+  .badge b{color:var(--ok);font-weight:600}
+  .badge.sim b{color:var(--accent)}
+  aside{border-right:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:24px}
+  aside .logo{width:208px}
+  aside .logo img{width:100%;display:block}
+  nav{display:flex;flex-direction:column;gap:2px}
+  nav a{color:var(--dim);text-decoration:none;padding:10px 12px;border:1px solid transparent;letter-spacing:.12em}
+  nav a.on{color:var(--accent);border-color:var(--line);background:var(--surface)}
+  main{padding:20px;overflow:auto}
+  footer{grid-column:1/3;border-top:1px solid var(--line);padding:10px 16px;overflow:auto}
+  footer .log{color:var(--dim);line-height:1.7;font-size:12px}
+  footer .log b{color:var(--accent);font-weight:500}
+  h1{font-size:14px;letter-spacing:.18em;margin:0 0 4px}
+  h2{font-size:11px;letter-spacing:.18em;color:var(--dim);margin:24px 0 10px;font-weight:600}
+  .stagerail{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0 20px}
+  .stage{border:1px solid var(--line);padding:10px 12px;background:var(--surface)}
+  .stage .n{color:var(--dim);font-size:10px;letter-spacing:.15em}
+  .stage .t{margin-top:6px;letter-spacing:.08em}
+  .stage.on{border-color:var(--accent)}
+  .stage.on .t{color:var(--accent)}
+  .stage.done .t{color:var(--ok)}
+  .bar{height:2px;background:var(--line);margin-top:10px}
+  .bar i{display:block;height:2px;width:0;background:var(--accent);transition:width .3s}
+  .stage.done .bar i{background:var(--ok);width:100%}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .tile{border:1px solid var(--line);padding:12px;background:var(--surface)}
+  .tile .v{font-size:20px;margin-top:6px}
+  .tile .k{color:var(--dim);font-size:10px;letter-spacing:.15em}
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+  th{color:var(--dim);font-size:10px;letter-spacing:.15em;font-weight:600}
+  td.mask{color:var(--dim);letter-spacing:.2em}
+  .rowbtn{display:flex;gap:8px;margin-top:16px}
+  button{background:var(--surface);border:1px solid var(--line);color:var(--text);
+    font-family:var(--mono);padding:10px 16px;letter-spacing:.12em;cursor:pointer}
+  button.primary{border-color:var(--accent);color:var(--accent)}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  .panel{border:1px solid var(--line);background:var(--surface);padding:16px}
+  .cols{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}
+  .custody{color:var(--dim);font-size:11px;line-height:1.8}
+  .custody b{color:var(--text);font-weight:500}
+  /* gate modal */
+  #gate{position:fixed;inset:0;background:rgba(10,11,13,.94);display:flex;align-items:center;justify-content:center;z-index:9}
+  #gate .\boxed{width:640px;border:1px solid var(--accent);background:var(--bg);padding:28px}
+  #gate h1{color:var(--accent)}
+  #gate .legal{color:var(--dim);font-size:12px;line-height:1.8;margin:14px 0 20px}
+  #gate label{display:flex;gap:10px;align-items:flex-start;margin:12px 0;cursor:pointer;line-height:1.6}
+  #gate input{margin-top:3px;accent-color:#F97316}
+  .tag{color:var(--warn)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RECON COMMAND <span style="color:var(--dim)">/ RECOVERY CONSOLE</span></h1>
+  <div style="display:flex;gap:8px">
+    <div class="badge sim">MODE: <b>SIMULATION</b> — NO EXTRACTION LOGIC</div>
+    <div class="badge">CHAIN OF CUSTODY: <b>INTACT</b></div>
+  </div>
+</header>
+
+<aside>
+  <div class="logo"><img src="../../brand/verticals/lockup-recon.svg" alt="RECON COMMAND"></div>
+  <nav>
+    <a class="on" href="#">STAGES</a>
+    <a href="#">SOURCES</a>
+    <a href="#">RECORDS</a>
+    <a href="#">AUDIT LOG</a>
+    <a href="#">EXPORT</a>
+  </nav>
+  <div class="custody" style="margin-top:auto">
+    SESSION <b id="sid">—</b><br>
+    HOST <b>SFG-WS-01</b><br>
+    OS <b>WIN-11-X64</b><br>
+    ACTOR <b>OPERATOR-01</b>
+  </div>
+</aside>
+
+<main>
+  <h1>RECOVERY PIPELINE</h1>
+  <div style="color:var(--dim)">Authorized forensic recovery workflow — every action is written to an append-only, hash-chained audit log.</div>
+
+  <div class="stagerail" id="rail">
+    <div class="stage" data-s="0"><div class="n">STAGE 01</div><div class="t">SOURCE SELECT</div><div class="bar"><i></i></div></div>
+    <div class="stage" data-s="1"><div class="n">STAGE 02</div><div class="t">KEY CONTEXT CHECK</div><div class="bar"><i></i></div></div>
+    <div class="stage" data-s="2"><div class="n">STAGE 03</div><div class="t">PROCESS</div><div class="bar"><i></i></div></div>
+    <div class="stage" data-s="3"><div class="n">STAGE 04</div><div class="t">RECONSTRUCT</div><div class="bar"><i></i></div></div>
+    <div class="stage" data-s="4"><div class="n">STAGE 05</div><div class="t">EXPORT &amp; AUDIT</div><div class="bar"><i></i></div></div>
+  </div>
+
+  <div class="grid">
+    <div class="tile"><div class="k">CREDENTIAL RECORDS</div><div class="v" id="st1">0</div></div>
+    <div class="tile"><div class="k">HISTORY EVENTS</div><div class="v" id="st2">0</div></div>
+    <div class="tile"><div class="k">SESSION MAPS</div><div class="v" id="st3">0</div></div>
+    <div class="tile"><div class="k">INTEGRITY</div><div class="v" style="color:var(--ok)" id="st4">—</div></div>
+  </div>
+
+  <h2>RECONSTRUCTION PREVIEW — SECRETS MASKED BY DEFAULT</h2>
+  <table>
+    <thead><tr><th>SOURCE</th><th>CLASS</th><th>DOMAIN</th><th>VALUE</th><th>RECOVERED</th></tr></thead>
+    <tbody>
+      <tr><td>Browser-A / Profile 1</td><td>LOGIN</td><td>portal.example-ship.test</td><td class="mask">••••••••••••</td><td>2026-09-23T07:40Z</td></tr>
+      <tr><td>Browser-A / Profile 1</td><td>COOKIE</td><td>portal.example-ship.test</td><td class="mask">••••••••••••</td><td>2026-09-23T07:40Z</td></tr>
+      <tr><td>Browser-B / Default</td><td>LOGIN</td><td>mail.example-ship.test</td><td class="mask">••••••••••••</td><td>2026-09-23T07:41Z</td></tr>
+      <tr><td>Browser-B / Default</td><td>HISTORY</td><td>docs.example-ship.test</td><td class="mask">••••••••••••</td><td>2026-09-23T07:41Z</td></tr>
+    </tbody>
+  </table>
+  <div class="rowbtn">
+    <button class="primary" id="run" disabled>RUN PIPELINE (SIMULATED)</button>
+    <button id="reveal" disabled>REVEAL — REQUIRES SECOND GATE</button>
+    <button id="reset">RESET SESSION</button>
+  </div>
+
+  <h2>EXPORT &amp; CUSTODY</h2>
+  <div class="cols">
+    <div class="panel custody">
+      BUNDLE <b>recon-2026-09-23.sfgx</b><br>
+      CONTAINER <b>encrypted tar (AES-256-GCM / age)</b><br>
+      MANIFEST <b>manifest.json + SHA-256 per file</b><br>
+      AUDIT <b>AUDIT_LOG.jsonl (hash-chained)</b><br>
+      CUSTODY <b>CUSTODY.json (signed)</b>
+    </div>
+    <div class="panel custody">
+      MANIFEST HASH <b>sha256:9f3a…c210</b><br>
+      LOG HEAD <b id="loghead">sha256:0000…0000</b><br>
+      REDACTION <b>preview-masked</b><br>
+      RETENTION <b>30 days, then crypto-shred</b>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="log" id="log"></div>
+</footer>
+
+<!-- AUTHORIZATION GATE -->
+<div id="gate">
+  <div class="box">
+    <h1>AUTHORIZATION REQUIRED</h1>
+    <div class="legal">
+      This console is a <span class="tag">SIMULATION</span> of an authorized forensic recovery workflow.
+      It contains no credential extraction or decryption logic. Real recovery work must be performed only on
+      systems you own or hold written authorization to audit, using established audited forensic tooling.
+      Unauthorized access to stored credentials may violate the CFAA, GDPR/DPA, and computer-misuse law in your jurisdiction.
+    </div>
+    <label><input type="checkbox" id="c1"> I confirm I own this system / hold written authorization to audit it.</label>
+    <label><input type="checkbox" id="c2"> I accept a tamper-evident, hash-chained audit log of every action in this session.</label>
+    <div class="rowbtn">
+      <button class="primary" id="begin" disabled>AUTHORIZE &amp; BEGIN</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const logEl = document.getElementById('log');
+const gate = document.getElementById('gate');
+const begin = document.getElementById('begin');
+const runBtn = document.getElementById('run');
+let simTimer = null;
+
+function stamp(){ return new Date().toISOString().slice(11,19) + 'Z'; }
+function say(msg, hl){
+  const line = document.createElement('div');
+  line.innerHTML = `<b>${stamp()}</b> ${hl ? '<b>'+msg+'</b>' : msg}`;
+  logEl.appendChild(line);
+  logEl.parentElement.scrollTop = 9e9;
+}
+function sid(){
+  const hex = '0123456789ABCDEF';
+  let s = '';
+  for (let i = 0; i < 8; i++) s += hex[Math.floor(Math.random()*16)];
+  return s;
+}
+
+['c1','c2'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+  begin.disabled = !(document.getElementById('c1').checked && document.getElementById('c2').checked);
+}));
+
+begin.addEventListener('click', () => {
+  gate.style.display = 'none';
+  document.getElementById('sid').textContent = sid();
+  say('GATE_OK — authorization confirmed; session stamped into audit log', true);
+  say('KEYCHECK — current-user/OS context validated for this authorized session');
+  say('PIPELINE READY — simulated engine boundary; no extraction logic in this console', true);
+  runBtn.disabled = false;
+});
+
+const steps = [
+  ['STAGE 01 SOURCE SELECT — scope set: LOGINS, COOKIES, HISTORY (simulated sources)'],
+  ['STAGE 02 KEY CONTEXT — operator context matches authorized account'],
+  ['STAGE 03 PROCESS — delegating to external audited engine (simulated boundary)', 2200],
+  ['STAGE 04 RECONSTRUCT — timeline assembled; session map + domain index built', 1500],
+  ['STAGE 05 EXPORT — manifest hashed; audit log sealed into .sfgx bundle', 1200],
+];
+const counts = [[214, 1832, 46],[612, 5210, 128]];
+
+runBtn.addEventListener('click', () => {
+  if (simTimer) return;
+  runBtn.disabled = true;
+  const stages = [...document.querySelectorAll('.stage')];
+  let i = 0;
+  say('PIPELINE_START — simulation only; audit entry written', true);
+  const advance = () => {
+    if (i > 0) {
+      stages[i-1].classList.remove('on');
+      stages[i-1].classList.add('done');
+      stages[i-1].querySelector('i').style.width = '100%';
+    }
+    if (i >= steps.length) {
+      const c = counts[0];
+      document.getElementById('st1').textContent = c[0];
+      document.getElementById('st2').textContent = c[1];
+      document.getElementById('st3').textContent = c[2];
+      document.getElementById('st4').textContent = 'SHA-256 OK';
+      document.getElementById('loghead').textContent = 'sha256:e2b1…a70c';
+      say('PIPELINE_OK — 214 masked records ready for export; reveal requires second gate', true);
+      document.getElementById('reveal').disabled = false;
+      simTimer = null;
+      return;
+    }
+    stages[i].classList.add('on');
+    stages[i].querySelector('i').style.width = '60%';
+    say(steps[i][0]);
+    i++;
+    simTimer = setTimeout(advance, steps[i-1][2] || 900);
+  };
+  advance();
+});
+
+document.getElementById('reveal').addEventListener('click', () => {
+  say('REVEAL_DENIED — second authorization gate required in production build (logged)', true);
+});
+document.getElementById('reset').addEventListener('click', () => location.reload());
+
+say('CONSOLE BOOT — RECON COMMAND v0.1 (UI simulation). No credential logic loaded.');
+</script>
+</body>
+</html>

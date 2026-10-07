@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CONTENT COMMAND</title>
+  <link rel="icon" href="../../design/brand/core/mark-collapsed.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-density="comfortable">
+  <div id="app" class="app">
+    <!-- SIDEBAR -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <button id="collapseBtn" class="icon-btn" title="TOGGLE SIDEBAR" aria-label="Toggle sidebar"></button>
+        <img id="logoExpanded" class="logo-expanded" src="../../design/brand/core/lockup-expanded.svg" alt="CONTENT COMMAND" />
+        <img id="logoCollapsed" class="logo-collapsed" src="../../design/brand/core/mark-collapsed.svg" alt="" />
+      </div>
+
+      <nav id="nav" class="nav"></nav>
+
+      <div class="sidebar-foot">
+        <button id="densityBtn" class="icon-btn" title="TOGGLE DENSITY" aria-label="Toggle density"></button>
+        <span class="foot-label" id="densityLabel">DENSITY: COMFORT</span>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb" id="crumb">COMMAND DASHBOARD</div>
+        <div class="topbar-status" id="topStatus"></div>
+      </header>
+      <section id="view" class="view"></section>
+    </main>
+  </div>
+
+  <div id="detail" class="detail-overlay" hidden></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
